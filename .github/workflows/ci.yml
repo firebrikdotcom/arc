@@ -315,16 +315,53 @@ jobs:
           export CHROMIUM_PATH="$(node --input-type=module -e "import { chromium } from '@playwright/test'; console.log(chromium.executablePath())")"
           bash tests/bounded-reads/run.sh
 
+  durable-audit:
+    name: Durable Access Audit Restart Regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Verify the durable audit journal survives process replacement
+        run: |
+          export CHROMIUM_PATH="$(node --input-type=module -e "import { chromium } from '@playwright/test'; console.log(chromium.executablePath())")"
+          bash tests/durable-audit/run-browser.sh
+
+  security-session:
+    name: Security Session Browser Suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # Runs the threat-model browser suite, including the unchanged WebSocket
+      # GAP checks. Those characterize still-open issues; gating on this suite
+      # does not claim they are fixed.
+      - name: Verify browser session invalidation and threat-model coverage
+        run: |
+          export CHROMIUM_PATH="$(node --input-type=module -e "import { chromium } from '@playwright/test'; console.log(chromium.executablePath())")"
+          bash tests/security/run.sh
+
   # Summary job (required for branch protection)
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [quality, build, test, coverage, frontend, benthos, docs, integration, bounded-collections]
+    needs: [quality, build, test, coverage, frontend, benthos, docs, integration, bounded-collections, durable-audit, security-session]
     if: always()
     steps:
       - name: Check all jobs
         run: |
           if [[ "${{ needs.bounded-collections.result }}" != "success" ]] || \
+             [[ "${{ needs.durable-audit.result }}" != "success" ]] || \
+             [[ "${{ needs.security-session.result }}" != "success" ]] || \
              [[ "${{ needs.quality.result }}" != "success" ]] || \
              [[ "${{ needs.build.result }}" != "success" ]] || \
              [[ "${{ needs.test.result }}" != "success" ]] || \
