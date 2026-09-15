@@ -12,7 +12,7 @@ categories = ["database", "asynchronous"]
 
 [dependencies]
 # Workspace crates
-arc-core = { path = "../arc-core", version = "0.8.7" }
+arc-core = { path = "../arc-core", version = "0.8.8" }
 
 # Database
 diesel = { workspace = true, features = ["sqlite", "r2d2"] }
@@ -31,4 +31,4 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
 tracing.workspace = true
 
 [dev-dependencies]
-arc-core = { path = "../arc-core", version = "0.8.7", features = ["test-utils"] }
+arc-core = { path = "../arc-core", version = "0.8.8", features = ["test-utils"] }

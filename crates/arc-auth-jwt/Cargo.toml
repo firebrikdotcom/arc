@@ -8,9 +8,9 @@ repository.workspace = true
 description = "Optional JWT API authentication plugin for Arc"
 
 [dependencies]
-arc-auth-core = { path = "../arc-auth-core", version = "0.8.7" }
-arc-core = { path = "../arc-core", version = "0.8.7" }
-arc-web = { path = "../arc-web", version = "0.8.7" }
+arc-auth-core = { path = "../arc-auth-core", version = "0.8.8" }
+arc-core = { path = "../arc-core", version = "0.8.8" }
+arc-web = { path = "../arc-web", version = "0.8.8" }
 actix-web.workspace = true
 async-trait.workspace = true
 serde.workspace = true

@@ -11,14 +11,14 @@ keywords = ["event-sourcing", "cqrs", "nats", "jetstream", "events"]
 categories = ["asynchronous"]
 
 [dependencies]
-arc-core = { path = "../arc-core", version = "0.8.7" }
+arc-core = { path = "../arc-core", version = "0.8.8" }
 
 async-nats.workspace = true
 async-trait.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
-arc-core = { path = "../arc-core", version = "0.8.7", features = ["test-utils"] }
+arc-core = { path = "../arc-core", version = "0.8.8", features = ["test-utils"] }
 futures-util.workspace = true
 tokio.workspace = true
 uuid.workspace = true

@@ -1,10 +1,12 @@
 # Arc Project Progress
 
 **Last updated:** 2026-09-14
-**Current development version:** 0.8.7
+**Current development version:** 0.8.8
 **Latest published version:** 0.8.6
-**Status:** v0.8.7 integrates the four security workstreams, validated locally with
-workspace tests, live storage/routing integration, browser E2E and static checks.
+**Status:** v0.8.8 integrates three further security workstreams — bounded collection
+reads, a durable SQLite read-audit journal, and durable browser-session invalidation —
+on top of the v0.8.7 security work, validated locally with workspace tests, live
+storage/routing integration, browser E2E and static checks.
 Package publication remains at v0.8.6, which is released successfully. The reusable framework, standalone application
 generator, authentication plugins, Benthos routing/generation, and generated-app UI are
 implemented and validated. Remaining roadmap work focuses on security hardening, extensibility,

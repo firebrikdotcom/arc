@@ -97,6 +97,43 @@ profile and audit behavior. The E2E launcher honors `CARGO_TARGET_DIR` and an
 optional system Chromium executable. This is local integration evidence; it does
 not claim remote CI, package publication, or resolution of all threat-model risks.
 
+## Master integration validation — v0.8.8 (2026-09-14)
+
+Three further security workstreams — bounded collection reads, the durable SQLite
+read-audit journal, and durable browser-session invalidation — were merged one at a
+time, each with an explicit merge commit and a full cumulative verification pass in
+a project-scoped Docker Compose environment (Rust 1.90, PostgreSQL 16, a real NATS
+server and Redpanda Connect, Chromium).
+
+- `cargo test --locked --workspace --all-features`: 301 passed, 0 failed; the 12
+  existing documentation examples remain ignored. Postgres was configured and the
+  NATS/Benthos routing prerequisites were present, so no prerequisite skips applied.
+- `cargo test --locked --workspace --doc`: 20 passed, 12 existing ignored examples.
+- `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`,
+  `cargo fmt --all -- --check`, `cargo doc --locked --workspace --no-deps
+  --all-features`, and debug and release builds: passed.
+- Docsify freshness, the architecture drift guard, Benthos generator
+  tests/freshness/lint, the Vite production build and `npm audit`: passed.
+- Application Playwright suite: 14 passed. Fresh minimal and UI scaffolds passed
+  through `scripts/check-arc-scaffold.sh`.
+- Bounded-collections harness: 202 focused storage/doc tests, a freshly generated
+  application with its own tests and static checks, and the Chromium API/browser/
+  admin navigation suite.
+- Durable-audit harness: both real Chromium phases, proving a committed receipt
+  survives replacement of the serving process.
+- Threat-model Chromium suite: 11 passed. Nine are positive browser/real-TCP
+  session checks; the remaining two remain **characterizations of open WebSocket
+  gaps** and assert the current, unfixed behavior.
+- Dependency audit: exit 0 against the pre-existing workflow exceptions only.
+
+`tests/durable-audit/run-browser.sh` and `tests/security/run.sh` are now required
+CI jobs alongside the bounded-collections job, so these regressions are enforced
+rather than run by hand.
+
+This is local integration evidence plus the CI gates it installs. It does not claim
+package publication, nor resolution of the room-authorization, projection-origin or
+deployment disclosure/retention items, which remain open.
+
 ## Bounded collection follow-up (2026-09-14)
 
 Storage and generated collection regression coverage is documented in

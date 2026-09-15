@@ -21,12 +21,12 @@ postgres = ["dep:arc-es-postgres"]
 test-utils = []
 
 [dependencies]
-arc-auth-core = { path = "../arc-auth-core", version = "0.8.7" }
+arc-auth-core = { path = "../arc-auth-core", version = "0.8.8" }
 # Workspace crates
-arc-core = { path = "../arc-core", version = "0.8.7" }
-arc-es-sqlite = { path = "../arc-es-sqlite", version = "0.8.7" }
-arc-es-nats = { path = "../arc-es-nats", version = "0.8.7", optional = true }
-arc-es-postgres = { path = "../arc-es-postgres", version = "0.8.7", optional = true }
+arc-core = { path = "../arc-core", version = "0.8.8" }
+arc-es-sqlite = { path = "../arc-es-sqlite", version = "0.8.8" }
+arc-es-nats = { path = "../arc-es-nats", version = "0.8.8", optional = true }
+arc-es-postgres = { path = "../arc-es-postgres", version = "0.8.8", optional = true }
 
 # Web framework
 actix-web.workspace = true
@@ -77,5 +77,5 @@ async-trait.workspace = true
 sqlx = { version = "0.8.6", default-features = false, features = ["sqlite", "runtime-tokio-rustls"] }
 
 [dev-dependencies]
-arc-core = { path = "../arc-core", version = "0.8.7", features = ["test-utils"] }
+arc-core = { path = "../arc-core", version = "0.8.8", features = ["test-utils"] }
 serial_test.workspace = true

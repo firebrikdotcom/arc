@@ -26,7 +26,7 @@ postgres = ["dep:arc-es-postgres", "arc-web/postgres"]
 
 [dependencies]
 # Framework runtime (Arc-owned web/runtime machinery)
-arc-web = { path = "../arc-web", version = "0.8.7", default-features = false }
+arc-web = { path = "../arc-web", version = "0.8.8", default-features = false }
 # Workspace crates
 arc-core = { path = "../arc-core" }
 arc-es-sqlite = { path = "../arc-es-sqlite" }

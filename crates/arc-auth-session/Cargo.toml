@@ -8,8 +8,8 @@ repository.workspace = true
 description = "Optional browser session authentication plugin for Arc"
 
 [dependencies]
-arc-auth-core = { path = "../arc-auth-core", version = "0.8.7" }
-arc-web = { path = "../arc-web", version = "0.8.7" }
+arc-auth-core = { path = "../arc-auth-core", version = "0.8.8" }
+arc-web = { path = "../arc-web", version = "0.8.8" }
 actix-session.workspace = true
 actix-web.workspace = true
 async-trait.workspace = true

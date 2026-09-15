@@ -12,7 +12,7 @@ categories = ["database", "asynchronous"]
 
 [dependencies]
 # Workspace crates
-arc-core = { path = "../arc-core", version = "0.8.7" }
+arc-core = { path = "../arc-core", version = "0.8.8" }
 
 # Database
 sqlx.workspace = true
@@ -32,4 +32,4 @@ tracing.workspace = true
 
 [dev-dependencies]
 serial_test.workspace = true
-arc-core = { path = "../arc-core", version = "0.8.7", features = ["test-utils"] }
+arc-core = { path = "../arc-core", version = "0.8.8", features = ["test-utils"] }

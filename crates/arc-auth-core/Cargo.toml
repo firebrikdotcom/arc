@@ -8,7 +8,7 @@ repository.workspace = true
 description = "Composable identity and authorization contracts for Arc"
 
 [dependencies]
-arc-core = { path = "../arc-core", version = "0.8.7" }
+arc-core = { path = "../arc-core", version = "0.8.8" }
 async-trait.workspace = true
 serde.workspace = true
 thiserror.workspace = true

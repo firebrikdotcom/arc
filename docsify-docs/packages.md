@@ -1,8 +1,11 @@
 # Published Packages
 
-The latest published package version is **0.8.6**. Source version **0.8.7** contains
-the merged security workstreams; a local Git tag does not publish crates. The
-installation examples below continue to target published packages.
+The latest published package version is **0.8.6**. Source version **0.8.8** contains
+the merged security workstreams. Tagging a release publishes the GitHub release,
+its prebuilt binaries and the documentation site, but crates.io publication is
+gated on the `PUBLISH_CRATES` repository variable and is currently disabled, so
+the published package version stays at 0.8.6. The installation examples below
+continue to target published packages.
 
 Generated applications use published crates; they do not depend on an Arc repository checkout.
 

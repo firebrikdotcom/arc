@@ -8,18 +8,18 @@ repository.workspace = true
 description = "Simple role-based authorization policy for Arc"
 
 [dependencies]
-arc-auth-core = { path = "../arc-auth-core", version = "0.8.7" }
-arc-web = { path = "../arc-web", version = "0.8.7" }
+arc-auth-core = { path = "../arc-auth-core", version = "0.8.8" }
+arc-web = { path = "../arc-web", version = "0.8.8" }
 async-trait.workspace = true
 actix-session.workspace = true
 actix-web.workspace = true
 futures-util.workspace = true
 
 [dev-dependencies]
-arc-auth-admin = { path = "../arc-auth-admin", version = "0.8.7" }
-arc-auth-db = { path = "../arc-auth-db", version = "0.8.7" }
-arc-auth-session = { path = "../arc-auth-session", version = "0.8.7" }
-arc-core = { path = "../arc-core", version = "0.8.7", features = ["test-utils"] }
+arc-auth-admin = { path = "../arc-auth-admin", version = "0.8.8" }
+arc-auth-db = { path = "../arc-auth-db", version = "0.8.8" }
+arc-auth-session = { path = "../arc-auth-session", version = "0.8.8" }
+arc-core = { path = "../arc-core", version = "0.8.8", features = ["test-utils"] }
 actix.workspace = true
 tokio.workspace = true
 serde_json.workspace = true
