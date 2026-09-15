@@ -156,7 +156,14 @@ test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
     --request POST --data-urlencode "csrf_token=$csrf_token" \
     --data-urlencode 'email=admin@example.com' --data-urlencode 'password=change-me-now' \
     http://127.0.0.1:39082/signin)" = "303"
-new_html="$(curl --silent --fail --cookie "$cookie_jar" http://127.0.0.1:39082/admin/products/new)"
+# Persist the refreshed session cookie, as a browser does. Signing in now clears
+# and renews the session to defeat session fixation, so the pre-login CSRF token
+# no longer survives authentication: this GET is what mints the token for the
+# POST below, and it arrives in an updated session cookie. Reading without
+# --cookie-jar would discard that cookie and submit a token the stored session
+# no longer knows.
+new_html="$(curl --silent --fail --cookie "$cookie_jar" --cookie-jar "$cookie_jar" \
+    http://127.0.0.1:39082/admin/products/new)"
 csrf_token="$(sed -n 's/.*name="csrf_token" value="\([^"]*\)".*/\1/p' <<<"$new_html")"
 test -n "$csrf_token"
 test "$(curl --silent --output /dev/null --write-out '%{http_code}' \

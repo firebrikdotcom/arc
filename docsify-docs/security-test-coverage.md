@@ -130,6 +130,14 @@ server and Redpanda Connect, Chromium).
 CI jobs alongside the bounded-collections job, so these regressions are enforced
 rather than run by hand.
 
+Behavioral note for non-browser clients: signing in now clears and renews the
+session to defeat session fixation, so a CSRF token minted **before**
+authentication is no longer valid afterwards. Browsers handle this transparently
+because they store the refreshed session cookie. Scripted clients must read the
+CSRF token from a page fetched *after* signing in and must persist the updated
+session cookie from that response; `scripts/check-arc-scaffold.sh` was corrected
+to do so.
+
 This is local integration evidence plus the CI gates it installs. It does not claim
 package publication, nor resolution of the room-authorization, projection-origin or
 deployment disclosure/retention items, which remain open.
