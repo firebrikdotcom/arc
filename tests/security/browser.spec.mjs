@@ -6,28 +6,116 @@ async function reset(request) {
 }
 test.beforeEach(async ({request}) => { await reset(request); });
 for (const change of ['remove-role', 'disable']) {
-  test(`GAP stale browser identity after ${change}; fresh JWT roles reject`, async ({ page, request }) => {
+  test(`browser session revoked after ${change} and remains revoked after restoration`, async ({ page, context, request }) => {
     const login = await (await page.goto('/fixture/login/alice')).json();
-    expect((await page.goto('/browser/admin')).status()).toBe(200);
+    const saved = await context.cookies();
+    expect(saved.some(c => c.httpOnly)).toBe(true);
+    expect((await page.goto('/browser/admin')).url()).toBe(`${baseURL}/browser/admin`);
     expect((await request.post(`/fixture/change/alice/${change}`)).status()).toBe(204);
-    const jwt = await request.get('/api/admin', {headers:{Authorization:`Bearer ${login.token}`}});
-    expect(jwt.status()).toBe(403);
-    const browserResponse = await page.goto('/browser/admin');
-    expect(browserResponse.status(), 'GAP: cached role/active state is still accepted; no invalidation policy implemented').toBe(desired ? 403 : 200);
+    expect((await request.get('/api/admin', {headers:{Authorization:`Bearer ${login.token}`}})).status()).toBe(403);
+    await page.goto('/browser/admin');
+    await expect(page).toHaveURL(/\/signin$/);
+    await request.post('/fixture/change/alice/reset');
+    await context.addCookies(saved);
+    await page.goto('/browser/admin');
+    await expect(page).toHaveURL(/\/signin$/);
+    await context.addCookies(saved);
+    await page.goto('/resources');
+    await expect(page).toHaveURL(/\/signin$/);
+    await page.goto('/fixture/login/alice');
+    expect((await page.goto('/browser/admin')).url()).toBe(`${baseURL}/browser/admin`);
   });
 }
-test('idle expiration purges browser identity; GAP saved logout cookie replay', async ({page, context}) => {
+test('logout revokes saved cookies and preserves another valid session', async ({page, context, browser}) => {
+  const other = await browser.newContext({baseURL});
+  try {
+    const second = await other.newPage();
+    await second.goto('/fixture/login/alice');
+    await page.goto('/fixture/login/alice');
+    const saved = await context.cookies();
+    expect(saved.some(c => c.httpOnly)).toBe(true);
+    expect((await page.request.post('/fixture/logout')).status()).toBe(204);
+    await context.addCookies(saved);
+    await page.goto('/browser/admin');
+    await expect(page).toHaveURL(/\/signin$/);
+    expect((await second.goto('/browser/admin')).url()).toBe(`${baseURL}/browser/admin`);
+  } finally { await other.close(); }
+});
+test('idle expiration durably revokes even an earlier non-expired cookie', async ({page, context}) => {
   await page.goto('/fixture/login/alice');
   const saved = await context.cookies();
-  expect(saved.some(c => c.httpOnly)).toBe(true);
-  await page.request.post('/fixture/logout');
-  await page.goto('/browser/admin');
-  await expect(page).toHaveURL(/\/signin$/);
-  await context.addCookies(saved);
-  expect((await page.goto('/browser/admin')).status(), 'GAP: previously issued cookie remains replayable').toBe(desired ? 403 : 200);
   await page.request.post('/fixture/expire');
   await page.goto('/browser/admin');
   await expect(page).toHaveURL(/\/signin\?reason=idle$/);
+  await context.addCookies(saved);
+  await page.goto('/browser/admin');
+  await expect(page).toHaveURL(/\/signin$/);
+  await page.goto('/fixture/login/alice');
+  expect((await page.goto('/resources')).url()).toBe(`${baseURL}/resources`);
+});
+test('store outage denies browser access and logout, then recovers', async ({page, request}) => {
+  await page.goto('/fixture/login/alice');
+  await request.post('/fixture/outage/on');
+  try {
+    expect((await page.goto('/browser/admin')).status()).toBe(503);
+    await expect(page.locator('body')).toContainText('Authentication is temporarily unavailable.');
+    expect((await page.goto('/resources')).status()).toBe(503);
+    expect((await page.request.post('/fixture/logout')).status()).toBe(503);
+  } finally { await request.post('/fixture/outage/off'); }
+  expect((await page.goto('/browser/admin')).url()).toBe(`${baseURL}/browser/admin`);
+});
+test('real HTTP rejects replay and does not let a cookie override a JWT actor', async ({request, playwright}) => {
+  const client = await playwright.request.newContext({baseURL});
+  try {
+    const alice = await (await client.get('/fixture/login/alice')).json();
+    const state = await client.storageState();
+    expect(state.cookies.length).toBeGreaterThan(0);
+    const cookie = state.cookies.map(c => `${c.name}=${c.value}`).join('; ');
+    expect((await client.get('/resources', {maxRedirects:0})).status()).toBe(200);
+    const bob = await (await request.get('/fixture/login/bob')).json();
+    await request.post('/fixture/change/bob/remove-role');
+    expect((await client.get('/api/admin', {headers:{Authorization:`Bearer ${bob.token}`}})).status()).toBe(403);
+    expect((await client.get('/api/admin', {headers:{Authorization:`Bearer ${alice.token}`}})).status()).toBe(200);
+    await client.post('/fixture/logout');
+    const replay = await request.get('/resources', {headers:{Cookie:cookie}, maxRedirects:0});
+    expect(replay.status()).toBe(302);
+    expect(replay.headers().location).toBe('/signin');
+  } finally { await client.dispose(); }
+});
+test('reauthentication rotates the old browser handle', async ({page, context}) => {
+  await page.goto('/fixture/login/alice');
+  const saved = await context.cookies();
+  expect(saved.length).toBeGreaterThan(0);
+  await page.goto('/fixture/login/alice');
+  expect((await page.goto('/resources')).url()).toBe(`${baseURL}/resources`);
+  await context.addCookies(saved);
+  await page.goto('/resources');
+  await expect(page).toHaveURL(/\/signin$/);
+});
+test('production signout requires CSRF and revokes the saved cookie', async ({page, context}) => {
+  await page.goto('/fixture/login/alice');
+  const token = await (await page.request.get('/fixture/csrf')).text();
+  const saved = await context.cookies();
+  expect((await page.request.post('/signout', {form:{csrf_token:'wrong'}, maxRedirects:0})).status()).toBe(403);
+  expect((await page.goto('/resources')).url()).toBe(`${baseURL}/resources`);
+  expect((await page.request.post('/signout', {form:{csrf_token:token}, maxRedirects:0})).status()).toBe(303);
+  await context.addCookies(saved);
+  await page.goto('/admin/users');
+  await expect(page).toHaveURL(/\/signin$/);
+});
+test('idle revocation fails closed during outage and completes after recovery', async ({page, context, request}) => {
+  await page.goto('/fixture/login/alice');
+  const saved = await context.cookies();
+  expect(saved.length).toBeGreaterThan(0);
+  await page.request.post('/fixture/expire');
+  await request.post('/fixture/outage/on');
+  try { expect((await page.goto('/resources')).status()).toBe(503); }
+  finally { await request.post('/fixture/outage/off'); }
+  await page.goto('/resources');
+  await expect(page).toHaveURL(/\/signin\?reason=idle$/);
+  await context.addCookies(saved);
+  await page.goto('/resources');
+  await expect(page).toHaveURL(/\/signin$/);
 });
 async function openSocket(page) {
   await page.evaluate(() => {

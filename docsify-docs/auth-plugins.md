@@ -140,3 +140,45 @@ built-in user-management pages currently require the literal `admin` role.
 
 Authentication plugins therefore provide identity, transport authentication, and the current role
 guard; they do not yet make every application action dynamically configurable.
+
+## Browser session invalidation
+
+`arc-auth-session` requires durable browser-session support from its `IdentityStore`.
+`arc-auth-db` installs the identity tables first, then the idempotent
+`90000000000001_browser_sessions` migration during setup. Existing databases must
+run setup before serving the updated plugins. Pre-migration cookies require a new sign-in.
+Custom stores must implement `authenticate_browser`, `browser_identity`, and
+`revoke_browser_session`; the default implementations deny access.
+
+Each successful login creates a random server-side handle. `RequireSession` checks
+that handle and the current active identity on every protected request, then supplies
+the validated identity to RBAC. Generated admin and resource routes already use
+this guard. Role changes, disable/enable operations and password changes delete all
+of the account's browser handles atomically with the identity write. Restoring a
+role or re-enabling an account never restores old cookies. Logout revokes only the
+current handle before clearing the cookie; other sessions remain valid. It remains
+a CSRF-protected POST. Re-authentication rotates the previous handle.
+
+`ARC_BROWSER_SESSION_TTL_SECONDS` configures both the runtime cookie lifetime and
+the server-side absolute deadline (positive integer; default 86400 seconds, matching
+the existing 24-hour cookie lifetime). Cookie refresh cannot extend the server-side
+absolute deadline. `SESSION_IDLE_TIMEOUT_SECS` remains a separate inactivity limit:
+activity refreshes it; detected idle expiry revokes the handle before purging the
+cookie. A previously saved cookie cannot resurrect that revoked session. A request
+already authorized before revocation may finish; subsequent checks deny access.
+
+Store outages fail closed with HTTP 503, including logout and idle revocation;
+logout does not claim success before persistence succeeds. Diagnostic events log
+only the operation and a fixed message, never credentials, cookies or raw store
+errors. Recovery permits still-valid handles to work again. JWT token issuance and
+revocation remain separate; JWT RBAC resolves its own actor even when a browser
+cookie accompanies the request.
+
+Session rows contain only the random handle, identity ID and expiry. Revocation
+deletes rows; login removes expired rows. This is operational authentication state,
+not an audit retention policy. Operators still choose deployment timeouts, HTTPS,
+cookie scope, database availability/backups and any independent audit retention.
+Direct SQL identity mutations must also invalidate affected handles; use the
+identity-store methods to preserve the transactional contract. Object/tenant and
+WebSocket-room authorization remain application responsibilities. The built-in
+projection-backed `arc-app` auth path is separate from these optional plugins.

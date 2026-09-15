@@ -203,6 +203,9 @@ async fn signin(
         Ok(_) => HttpResponse::SeeOther()
             .insert_header(("Location", "/admin"))
             .finish(),
+        Err(arc_auth_core::AuthError::Store(_)) => {
+            HttpResponse::ServiceUnavailable().body("Authentication is temporarily unavailable.")
+        }
         Err(_) => signin_response(
             &req,
             &session,
@@ -217,11 +220,21 @@ async fn signin(
 struct CsrfForm {
     csrf_token: String,
 }
-async fn signout(form: web::Form<CsrfForm>, session: Session) -> HttpResponse {
+async fn signout(
+    form: web::Form<CsrfForm>,
+    session: Session,
+    store: web::Data<dyn IdentityStore>,
+) -> HttpResponse {
     if !csrf(&session, &form.csrf_token) {
         return HttpResponse::Forbidden().finish();
     }
-    arc_auth_session::sign_out(&session);
+    if arc_auth_session::sign_out(&session, store.get_ref())
+        .await
+        .is_err()
+    {
+        return HttpResponse::ServiceUnavailable()
+            .body("Authentication is temporarily unavailable.");
+    }
     HttpResponse::SeeOther()
         .insert_header(("Location", "/"))
         .finish()

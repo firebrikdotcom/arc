@@ -21,6 +21,7 @@ postgres = ["dep:arc-es-postgres"]
 test-utils = []
 
 [dependencies]
+arc-auth-core = { path = "../arc-auth-core", version = "0.8.7" }
 # Workspace crates
 arc-core = { path = "../arc-core", version = "0.8.7" }
 arc-es-sqlite = { path = "../arc-es-sqlite", version = "0.8.7" }

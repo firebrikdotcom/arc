@@ -34,6 +34,28 @@ pub enum AuthError {
 
 #[async_trait]
 pub trait IdentityStore: Send + Sync {
+    /// Issue a durable browser session atomically with credential verification.
+    /// Stores without browser-session support fail closed.
+    async fn authenticate_browser(
+        &self,
+        _email: &str,
+        _password: &str,
+        _ttl_seconds: u32,
+    ) -> Result<(Identity, String), AuthError> {
+        Err(AuthError::Store(
+            "browser sessions are not supported".into(),
+        ))
+    }
+    async fn browser_identity(&self, _session_id: &str) -> Result<Option<Identity>, AuthError> {
+        Err(AuthError::Store(
+            "browser sessions are not supported".into(),
+        ))
+    }
+    async fn revoke_browser_session(&self, _session_id: &str) -> Result<(), AuthError> {
+        Err(AuthError::Store(
+            "browser sessions are not supported".into(),
+        ))
+    }
     async fn authenticate(&self, email: &str, password: &str) -> Result<Identity, AuthError>;
     async fn get(&self, id: &str) -> Result<Option<Identity>, AuthError>;
     async fn list(&self) -> Result<Vec<Identity>, AuthError>;

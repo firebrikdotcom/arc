@@ -563,6 +563,7 @@ dependencies = [
  "actix",
  "actix-session 0.10.1",
  "actix-web",
+ "arc-auth-admin",
  "arc-auth-core",
  "arc-auth-db",
  "arc-auth-session",
@@ -586,6 +587,7 @@ dependencies = [
  "async-trait",
  "futures-util",
  "serde",
+ "tracing",
 ]
 
 [[package]]
@@ -667,6 +669,7 @@ dependencies = [
  "actix-web",
  "actix-web-actors",
  "actix-web-lab",
+ "arc-auth-core",
  "arc-core",
  "arc-es-nats",
  "arc-es-postgres",

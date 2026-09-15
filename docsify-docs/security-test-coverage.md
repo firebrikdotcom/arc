@@ -1,6 +1,7 @@
 # Security test coverage
 
-Verified 2026-09-13 in `security/threat-model-20260912`. This matrix supplements the
+Original coverage verified 2026-09-13 in `security/threat-model-20260912`; browser-session
+regressions added 2026-09-14 in `security/session-invalidation-20260914`. This matrix supplements the
 [threat model](threat-model.md). Passing a test named **GAP** confirms a reproducible
 weakness; it does not certify a mitigation or approve a release.
 
@@ -8,7 +9,8 @@ weakness; it does not certify a mitigation or approve a release.
 |---|---|---|
 | TM-03 JWT | `crates/arc-web/tests/security_http.rs::jwt_http_security_contract` | Real TCP HTTP: valid token; absent jti/store; revoked/unknown session; malformed, expired and wrong-key tokens; explicit legacy opt-in. Denials assert zero downstream calls and no protected body. Missing-jti/store defects reproduced before fix, then fixed (401/503). |
 | TM-04 object access | `crates/arc-app/src/http/controllers/profile_security_test.rs` | Real profile handler through JWT: caller cannot select another user's profile or obtain password fields. This covers the profile endpoint, not all application resources or tenants. |
-| TM-01/04 browser identities | `tests/security/browser.spec.mjs` | Chromium with real session/RBAC middleware and SQLite identities: fresh JWT roles reject role removal/disable; cached browser identities still accept them (GAP). Idle expiry purges identity; a saved pre-logout cookie remains replayable (GAP). |
+| TM-01/04 browser identities | `tests/security/browser.spec.mjs` | Chromium with real session/RBAC middleware and SQLite identities: fresh JWT roles reject role removal/disable; browser handles are revoked even after role/account restoration. Saved logout and idle-expiry cookies cannot replay; independent sessions remain valid; store outages deny access and recover. |
+| TM-01/04 store and middleware | `arc-auth-db::browser_tests::migration_upgrade_and_durable_invalidation`; `arc-auth-session::tests::cached_identity_cannot_authorize_without_a_validated_handle` | SQLite upgrade/idempotence, persisted handles across store instances, role/active/password invalidation, logout isolation and expiry; cached-only cookies and missing store wiring deny access. |
 | TM-07 projection | `crates/arc-app/tests/projection_security_http.rs` | Real TCP: absent/wrong credentials reject without projection mutation; duplicate event leaves the same row; valid bearer can inject an event absent from the event store (GAP). |
 | TM-08 delivery | `arc-core::command_bus::tests::publish_failure_preserves_event_for_explicit_recovery` | Unit fault injection proves append survives publish failure and explicit replay preserves event ID without another append. It is not automatic outbox recovery or crash durability. |
 | TM-08/09 distributed routing | `crates/arc-app/tests/benthos_projection_routing.rs` | Existing real NATS → Redpanda Connect → Arc projection test passed with actual binaries, without prerequisite skips. Broker crash/restart recovery remains untested by this check. |
@@ -102,6 +104,10 @@ Storage and generated collection regression coverage is documented in
 checks remain unchanged; collection hardening does not resolve session, socket,
 audit, or projection-origin gaps.
 
-The 2026-09-14 dependency audit also detected RUSTSEC-2026-0285 in the
-existing rustls pin. Cargo.lock now pins the fixed patch 0.23.45. The audit
-passes with the existing workflow exceptions unchanged.
+## Dependency security gate (2026-09-14)
+
+All three 2026-09-14 security workstreams carried the same dependency fix: the
+audit detected RUSTSEC-2026-0285 in the existing `rustls` pin, and Cargo.lock now
+pins the fixed patch 0.23.45. Cargo Audit passes using only the pre-existing
+workflow exceptions (RUSTSEC-2026-0258 and RUSTSEC-2023-0071); no exception was
+added for this advisory.

@@ -145,6 +145,7 @@ pub(crate) async fn run(
     let app_env = env::var("APP_ENV").unwrap_or_else(|_| "development".to_string());
     let is_production = app_env == "production";
 
+    let browser_session_ttl = crate::helpers::session::browser_session_ttl_seconds()?;
     let session_domain = env::var("SESSION_DOMAIN").ok();
 
     let same_site_str = env::var("SESSION_SAME_SITE").unwrap_or_else(|_| "Lax".to_string());
@@ -214,7 +215,10 @@ pub(crate) async fn run(
                 .cookie_name("arc_session".to_string())
                 .cookie_http_only(true)
                 .cookie_same_site(same_site)
-                .session_lifecycle(PersistentSession::default().session_ttl(Duration::hours(24)));
+                .session_lifecycle(
+                    PersistentSession::default()
+                        .session_ttl(Duration::seconds(i64::from(browser_session_ttl))),
+                );
 
         if is_production {
             session_middleware = session_middleware.cookie_secure(true);

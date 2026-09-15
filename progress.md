@@ -312,7 +312,8 @@ Remaining security follow-ups:
   [bounded collections](docsify-docs/bounded-collections.md).
 - [x] Durable read-audit persistence (2026-09-14): opt-in SQLite journal, required startup selection, migration/reopen, metadata minimization and bounded retention hook. Verified with locked workspace tests, HTTP lock/disk PHI rejection, real Chromium process-restart receipts, Clippy and Rust docs. See [operations](docsify-docs/access-logging-production-review.md).
 - [ ] Deployment audit policy: approve disclosure inventory, identifiers, retention/legal holds, storage access/encryption, archival and backup restore/erasure. No default legal duration or expanded disclosure scope is imposed.
-- [ ] Resolve cached-session invalidation, room authorization and projection-origin validation gaps identified by the threat model.
+- [x] Implement durable optional-plugin browser-session invalidation after role, active-state and password changes, logout and detected idle expiry. Old cookies cannot regain access after identity restoration; store failures deny access. See [auth plugins](docsify-docs/auth-plugins.md).
+- [ ] Resolve room authorization and projection-origin validation gaps identified by the threat model.
 
 ### Phase 3 — Plugin and hook system
 
