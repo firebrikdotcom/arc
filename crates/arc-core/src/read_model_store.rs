@@ -19,7 +19,8 @@
 //! - [`get`](ReadModelStore::get) — fetch one row by primary key.
 //! - [`find_by`](ReadModelStore::find_by) — fetch rows where a single field
 //!   equals a value (covers email lookups, secondary index reads).
-//! - [`list`](ReadModelStore::list) — fetch all rows in a table.
+//! - [`list`](ReadModelStore::list) — explicit internal all-rows read.
+//! - [`collection`](ReadModelStore::collection) — validated, bounded collection page.
 //! - [`truncate`](ReadModelStore::truncate) — wipe a table during projection
 //!   rebuild.
 //!
@@ -86,6 +87,76 @@ impl ReadModelError {
 /// Result type for read model store operations.
 pub type ReadModelResult<T> = Result<T, ReadModelError>;
 
+/// Validated collection window. SQL backends apply filtering and ordering before
+/// LIMIT/OFFSET; at most `limit + 1` rows are fetched to discover the next page.
+#[derive(Debug, Clone)]
+pub struct CollectionQuery {
+    pub limit: u64,
+    pub offset: u64,
+    pub filter: String,
+    pub order: CollectionOrder,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CollectionOrder {
+    Id,
+    NameAsc,
+    NameDesc,
+}
+
+impl CollectionQuery {
+    pub const MAX_LIMIT: u64 = 100;
+    pub const MAX_OFFSET: u64 = 1_000_000;
+    pub fn new(limit: u64, offset: u64) -> ReadModelResult<Self> {
+        let query = Self {
+            limit,
+            offset,
+            filter: String::new(),
+            order: CollectionOrder::Id,
+        };
+        query.validate()?;
+        Ok(query)
+    }
+    pub fn for_page(page: u64, limit: u64) -> ReadModelResult<Self> {
+        let offset = page
+            .max(1)
+            .checked_sub(1)
+            .and_then(|p| p.checked_mul(limit))
+            .ok_or_else(|| ReadModelError::query_failed("page overflow"))?;
+        Self::new(limit, offset)
+    }
+    pub fn validate(&self) -> ReadModelResult<()> {
+        if self.limit == 0
+            || self.limit > Self::MAX_LIMIT
+            || self.offset > Self::MAX_OFFSET
+            || self.filter.len() > 1024
+            || self.filter.contains('\0')
+        {
+            return Err(ReadModelError::query_failed(
+                "invalid collection window or filter",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct CollectionPage<T = Row> {
+    pub rows: Vec<T>,
+    pub has_next: bool,
+}
+impl<T> CollectionPage<T> {
+    pub fn from_rows(mut rows: Vec<T>, query: &CollectionQuery) -> Self {
+        let has_next = rows.len() > query.limit as usize
+            && query
+                .offset
+                .checked_add(query.limit)
+                .is_some_and(|next| next <= CollectionQuery::MAX_OFFSET);
+        rows.truncate(query.limit as usize);
+        Self { rows, has_next }
+    }
+}
+
 /// Version-gated upsert command.
 ///
 /// `version` is compared against the existing row's `version` column (if any).
@@ -146,8 +217,15 @@ pub trait ReadModelStore: Send + Sync {
         value: &serde_json::Value,
     ) -> ReadModelResult<Vec<Row>>;
 
-    /// Fetch every row in a table.
+    /// Fetch every row in a table. Use `collection` for public collection endpoints.
     async fn list(&self, table: &str) -> ReadModelResult<Vec<Row>>;
+
+    /// Fetch a bounded, deterministic collection window. No load-all fallback.
+    async fn collection(
+        &self,
+        table: &str,
+        query: &CollectionQuery,
+    ) -> ReadModelResult<CollectionPage>;
 
     /// Wipe a table. Used during projection rebuild before replay.
     async fn truncate(&self, table: &str) -> ReadModelResult<()>;
@@ -249,6 +327,48 @@ impl ReadModelStore for InMemoryReadModelStore {
 
     async fn list(&self, table: &str) -> ReadModelResult<Vec<Row>> {
         Ok(self.get_rows(table))
+    }
+
+    async fn collection(
+        &self,
+        table: &str,
+        query: &CollectionQuery,
+    ) -> ReadModelResult<CollectionPage> {
+        query.validate()?;
+        let tables = self.tables.lock().unwrap();
+        let needle = query.filter.to_ascii_lowercase();
+        let mut rows: Vec<_> = tables
+            .get(table)
+            .into_iter()
+            .flat_map(|t| t.iter())
+            .filter(|(_, row)| {
+                needle.is_empty()
+                    || row["name"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_ascii_lowercase()
+                        .contains(&needle)
+            })
+            .collect();
+        rows.sort_by(|(aid, a), (bid, b)| {
+            let names = a["name"]
+                .as_str()
+                .unwrap_or("")
+                .cmp(b["name"].as_str().unwrap_or(""));
+            match query.order {
+                CollectionOrder::Id => aid.cmp(bid),
+                CollectionOrder::NameAsc => names.then(aid.cmp(bid)),
+                CollectionOrder::NameDesc => names.reverse().then(aid.cmp(bid)),
+            }
+        });
+        Ok(CollectionPage::from_rows(
+            rows.into_iter()
+                .skip(query.offset as usize)
+                .take(query.limit as usize + 1)
+                .map(|(_, row)| row.clone())
+                .collect(),
+            query,
+        ))
     }
 
     async fn truncate(&self, table: &str) -> ReadModelResult<()> {
@@ -359,5 +479,98 @@ mod tests {
 
         store.truncate("users_view").await.unwrap();
         assert_eq!(store.total_rows(), 0);
+    }
+    #[tokio::test]
+
+    async fn bounded_collection_regression() {
+        let store = InMemoryReadModelStore::new();
+        for index in (0..105).rev() {
+            let id = format!("{index:03}");
+            store.upsert(Upsert::new("users_view", &id, json!({"id": id, "name": if index < 103 { "Same" } else { "Été 100%_" }, "email": format!("{index}@example.test"), "version": 1}))).await.unwrap();
+        }
+        let mut query = CollectionQuery::new(20, 0).unwrap();
+        query.order = CollectionOrder::NameAsc;
+        let first = store.collection("users_view", &query).await.unwrap();
+        assert_eq!(first.rows.len(), 20);
+        assert!(first.has_next);
+        assert_eq!(first.rows[0]["id"], "000");
+        query.offset = 20;
+        let second = store.collection("users_view", &query).await.unwrap();
+        assert_eq!(second.rows[0]["id"], "020");
+        assert_eq!(second.rows[19]["id"], "039");
+        query.offset = 100;
+        let last = store.collection("users_view", &query).await.unwrap();
+        assert_eq!(last.rows.len(), 5);
+        assert!(!last.has_next);
+        query.offset = CollectionQuery::MAX_OFFSET;
+        assert!(store
+            .collection("users_view", &query)
+            .await
+            .unwrap()
+            .rows
+            .is_empty());
+        query.offset = 0;
+        query.limit = 100;
+        assert_eq!(
+            store
+                .collection("users_view", &query)
+                .await
+                .unwrap()
+                .rows
+                .len(),
+            100
+        );
+        query.filter = "ÉTé 100%_".into();
+        let filtered = store.collection("users_view", &query).await.unwrap();
+        assert_eq!(filtered.rows.len(), 2);
+        assert_eq!(filtered.rows[0]["id"], "103");
+        query.filter = "same".into();
+        query.order = CollectionOrder::NameDesc;
+        assert_eq!(
+            store.collection("users_view", &query).await.unwrap().rows[0]["id"],
+            "000"
+        );
+        query.filter = "' OR 1=1 --".into();
+        assert!(store
+            .collection("users_view", &query)
+            .await
+            .unwrap()
+            .rows
+            .is_empty());
+        for limit in [0, 101, u64::MAX] {
+            query.limit = limit;
+            assert!(store.collection("users_view", &query).await.is_err());
+        }
+        query.limit = 20;
+        query.offset = u64::MAX;
+        assert!(store.collection("users_view", &query).await.is_err());
+        query.offset = 0;
+        for filter in ["é".repeat(513), "x\0y".into()] {
+            query.filter = filter;
+            assert!(store.collection("users_view", &query).await.is_err());
+        }
+    }
+
+    #[test]
+    fn collection_windows_validate_before_arithmetic_or_sql() {
+        assert_eq!(CollectionQuery::for_page(0, 20).unwrap().offset, 0);
+        assert_eq!(CollectionQuery::for_page(2, 20).unwrap().offset, 20);
+        for page in [u64::MAX, u64::MAX / 20 + 2, 50_002] {
+            assert!(CollectionQuery::for_page(page, 20).is_err());
+        }
+        let mut query = CollectionQuery::new(100, 1_000_000).unwrap();
+        query.filter = "é".repeat(512);
+        assert!(query.validate().is_ok());
+        query.filter.push('é');
+        assert!(query.validate().is_err());
+    }
+    #[test]
+    fn last_permitted_window_does_not_advertise_an_unreachable_page() {
+        let query = CollectionQuery::new(1, CollectionQuery::MAX_OFFSET).unwrap();
+        let page = CollectionPage::from_rows(vec![1, 2], &query);
+        assert_eq!(page.rows, vec![1]);
+        assert!(!page.has_next);
+        let query = CollectionQuery::new(1, CollectionQuery::MAX_OFFSET - 1).unwrap();
+        assert!(CollectionPage::from_rows(vec![1, 2], &query).has_next);
     }
 }

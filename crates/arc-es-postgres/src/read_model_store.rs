@@ -30,7 +30,10 @@
 //! names are bound as the `->>` operand and so are parameterized, but are still
 //! validated for parity with the SQLite store.
 
-use arc_core::read_model_store::{ReadModelError, ReadModelResult, ReadModelStore, Row, Upsert};
+use arc_core::read_model_store::{
+    CollectionOrder, CollectionPage, CollectionQuery, ReadModelError, ReadModelResult,
+    ReadModelStore, Row, Upsert,
+};
 use async_trait::async_trait;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::Row as _;
@@ -217,6 +220,35 @@ impl ReadModelStore for PostgresReadModelStore {
             .collect()
     }
 
+    async fn collection(
+        &self,
+        table: &str,
+        query: &CollectionQuery,
+    ) -> ReadModelResult<CollectionPage> {
+        query.validate()?;
+        check_ident("table name", table)?;
+        let order = match query.order {
+            CollectionOrder::Id => "id COLLATE \"C\" ASC",
+            CollectionOrder::NameAsc => {
+                "COALESCE(data ->> 'name', '') COLLATE \"C\" ASC, id COLLATE \"C\" ASC"
+            }
+            CollectionOrder::NameDesc => {
+                "COALESCE(data ->> 'name', '') COLLATE \"C\" DESC, id COLLATE \"C\" ASC"
+            }
+        };
+        let rows = sqlx::query(&format!("SELECT data FROM {table} WHERE strpos(translate(COALESCE(data ->> 'name', ''), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), $1) > 0 ORDER BY {order} LIMIT $2 OFFSET $3"))
+            .bind(query.filter.to_ascii_lowercase()).bind(query.limit as i64 + 1).bind(query.offset as i64)
+            .fetch_all(&self.pool).await.map_err(|e| ReadModelError::query_failed(e.to_string()))?;
+        let rows = rows
+            .iter()
+            .map(|r| {
+                r.try_get("data")
+                    .map_err(|e| ReadModelError::query_failed(e.to_string()))
+            })
+            .collect::<ReadModelResult<Vec<_>>>()?;
+        Ok(CollectionPage::from_rows(rows, query))
+    }
+
     async fn truncate(&self, table: &str) -> ReadModelResult<()> {
         check_ident("table name", table)?;
         sqlx::query(&format!("DELETE FROM {table}"))
@@ -400,5 +432,77 @@ mod tests {
         assert_eq!(store.list("users_view").await.unwrap().len(), 1);
         store.truncate("users_view").await.unwrap();
         assert!(store.list("users_view").await.unwrap().is_empty());
+    }
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn bounded_collection_regression() {
+        let Some(store) = live_store().await else {
+            return;
+        };
+        for index in (0..105).rev() {
+            let id = format!("{index:03}");
+            store.upsert(Upsert::new("users_view", &id, json!({"id": id, "name": if index < 103 { "Same" } else { "Été 100%_" }, "email": format!("{index}@example.test"), "version": 1}))).await.unwrap();
+        }
+        let mut query = CollectionQuery::new(20, 0).unwrap();
+        query.order = CollectionOrder::NameAsc;
+        let first = store.collection("users_view", &query).await.unwrap();
+        assert_eq!(first.rows.len(), 20);
+        assert!(first.has_next);
+        assert_eq!(first.rows[0]["id"], "000");
+        query.offset = 20;
+        let second = store.collection("users_view", &query).await.unwrap();
+        assert_eq!(second.rows[0]["id"], "020");
+        assert_eq!(second.rows[19]["id"], "039");
+        query.offset = 100;
+        let last = store.collection("users_view", &query).await.unwrap();
+        assert_eq!(last.rows.len(), 5);
+        assert!(!last.has_next);
+        query.offset = CollectionQuery::MAX_OFFSET;
+        assert!(store
+            .collection("users_view", &query)
+            .await
+            .unwrap()
+            .rows
+            .is_empty());
+        query.offset = 0;
+        query.limit = 100;
+        assert_eq!(
+            store
+                .collection("users_view", &query)
+                .await
+                .unwrap()
+                .rows
+                .len(),
+            100
+        );
+        query.filter = "ÉTé 100%_".into();
+        let filtered = store.collection("users_view", &query).await.unwrap();
+        assert_eq!(filtered.rows.len(), 2);
+        assert_eq!(filtered.rows[0]["id"], "103");
+        query.filter = "same".into();
+        query.order = CollectionOrder::NameDesc;
+        assert_eq!(
+            store.collection("users_view", &query).await.unwrap().rows[0]["id"],
+            "000"
+        );
+        query.filter = "' OR 1=1 --".into();
+        assert!(store
+            .collection("users_view", &query)
+            .await
+            .unwrap()
+            .rows
+            .is_empty());
+        for limit in [0, 101, u64::MAX] {
+            query.limit = limit;
+            assert!(store.collection("users_view", &query).await.is_err());
+        }
+        query.limit = 20;
+        query.offset = u64::MAX;
+        assert!(store.collection("users_view", &query).await.is_err());
+        query.offset = 0;
+        for filter in ["é".repeat(513), "x\0y".into()] {
+            query.filter = filter;
+            assert!(store.collection("users_view", &query).await.is_err());
+        }
     }
 }

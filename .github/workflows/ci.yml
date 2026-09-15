@@ -299,16 +299,33 @@ jobs:
       - name: Run integration tests
         run: cargo test --test '*' --verbose
 
+  bounded-collections:
+    name: Bounded Collection Storage and Browser Regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Verify SQLite, Postgres and generated browser collections in Compose
+        run: |
+          export CHROMIUM_PATH="$(node --input-type=module -e "import { chromium } from '@playwright/test'; console.log(chromium.executablePath())")"
+          bash tests/bounded-reads/run.sh
+
   # Summary job (required for branch protection)
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [quality, build, test, coverage, frontend, benthos, docs, integration]
+    needs: [quality, build, test, coverage, frontend, benthos, docs, integration, bounded-collections]
     if: always()
     steps:
       - name: Check all jobs
         run: |
-          if [[ "${{ needs.quality.result }}" != "success" ]] || \
+          if [[ "${{ needs.bounded-collections.result }}" != "success" ]] || \
+             [[ "${{ needs.quality.result }}" != "success" ]] || \
              [[ "${{ needs.build.result }}" != "success" ]] || \
              [[ "${{ needs.test.result }}" != "success" ]] || \
              [[ "${{ needs.frontend.result }}" != "success" ]] || \

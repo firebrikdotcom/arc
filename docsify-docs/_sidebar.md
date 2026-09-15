@@ -49,3 +49,5 @@
   * [Published Packages](packages.md)
 
 * [GitHub](https://github.com/lotharthesavior/arc)
+
+- [Bounded collections](bounded-collections.md)

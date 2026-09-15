@@ -3,7 +3,7 @@ use super::commands::{{Type}}Command;
 use super::projector::{{CONSTANT}}_VIEW;
 use actix_web::{delete, get, post, put, web, HttpResponse, Responder};
 use arc_core::command_bus::{CommandBus, CommandContext};
-use arc_core::read_model_store::ReadModelStore;
+use arc_core::read_model_store::{CollectionQuery, ReadModelStore};
 use serde::Deserialize;
 use serde_json::json;
 {{api-auth-import}}{{api-role-import}}
@@ -39,10 +39,17 @@ async fn create_{{module}}(
     }
 }
 
+#[derive(Deserialize)]
+struct CollectionParams { limit: Option<u64>, offset: Option<u64> }
+
 #[get("/{{view}}")]
-async fn list_{{view}}(store: web::Data<dyn ReadModelStore>) -> impl Responder {
-    match store.list({{CONSTANT}}_VIEW).await {
-        Ok(rows) => HttpResponse::Ok().json(rows),
+async fn list_{{view}}(store: web::Data<dyn ReadModelStore>, params: web::Query<CollectionParams>) -> impl Responder {
+    let query = match CollectionQuery::new(params.limit.unwrap_or(20), params.offset.unwrap_or(0)) {
+        Ok(query) => query,
+        Err(_) => return HttpResponse::BadRequest().json(json!({ "error": "invalid collection window" })),
+    };
+    match store.collection({{CONSTANT}}_VIEW, &query).await {
+        Ok(page) => HttpResponse::Ok().insert_header(("X-Has-Next", page.has_next.to_string())).json(page.rows),
         Err(error) => {
             HttpResponse::InternalServerError().json(json!({ "error": error.to_string() }))
         }

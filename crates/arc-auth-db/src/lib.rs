@@ -1,4 +1,4 @@
-use arc_auth_core::{AuthError, Identity, IdentityStore};
+use arc_auth_core::{AuthError, CollectionPage, CollectionQuery, Identity, IdentityStore};
 use arc_web::{ArcAppBuilder, ArcPlugin, PluginSetupContext};
 use argon2::{
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
@@ -120,6 +120,31 @@ impl IdentityStore for DbIdentityStore {
             .load::<UserRow>(&mut c)
             .map_err(|e| AuthError::Store(e.to_string()))?;
         rows.into_iter().map(|row| identity(&mut c, row)).collect()
+    }
+    async fn collection(
+        &self,
+        query: &CollectionQuery,
+    ) -> Result<CollectionPage<Identity>, AuthError> {
+        query
+            .validate()
+            .map_err(|e| AuthError::InvalidInput(e.to_string()))?;
+        let mut c = self.connect()?;
+        let filter = query.filter.trim().to_ascii_lowercase();
+        let rows = sql_query("SELECT id,name,email,'' AS password_hash,active FROM users WHERE instr(lower(name), ?) > 0 OR instr(lower(email), ?) > 0 ORDER BY email COLLATE BINARY, id COLLATE BINARY LIMIT ? OFFSET ?")
+            .bind::<diesel::sql_types::Text, _>(&filter)
+            .bind::<diesel::sql_types::Text, _>(&filter)
+            .bind::<diesel::sql_types::BigInt, _>(query.limit as i64 + 1)
+            .bind::<diesel::sql_types::BigInt, _>(query.offset as i64)
+            .load::<UserRow>(&mut c).map_err(|e| AuthError::Store(e.to_string()))?;
+        let page = CollectionPage::from_rows(rows, query);
+        Ok(CollectionPage {
+            rows: page
+                .rows
+                .into_iter()
+                .map(|row| identity(&mut c, row))
+                .collect::<Result<_, _>>()?,
+            has_next: page.has_next,
+        })
     }
     async fn has_users(&self) -> Result<bool, AuthError> {
         let mut c = self.connect()?;
@@ -319,5 +344,53 @@ mod tests {
             "admin@example.test"
         );
         assert!(hash("password").is_ok());
+    }
+    #[tokio::test]
+    async fn bounded_identity_collection_filters_and_orders_in_sql() {
+        use super::*;
+        let path = std::env::temp_dir().join(format!("arc-bounded-{}.sqlite", Uuid::new_v4()));
+        struct Cleanup(std::path::PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(path.clone());
+        let store = DbIdentityStore::new(path.to_str().unwrap());
+        let mut c = store.connect().unwrap();
+        c.batch_execute(IDENTITY_ROLES_MIGRATION).unwrap();
+        for i in (0..45).rev() {
+            sql_query("INSERT INTO users (id,name,email,password_hash,active,created_at,updated_at) VALUES (?,?,?,'unused',1,1,1)")
+                .bind::<diesel::sql_types::Text,_>(format!("{i:03}"))
+                .bind::<diesel::sql_types::Text,_>("Été 100%_")
+                .bind::<diesel::sql_types::Text,_>(format!("{i:03}@example.test"))
+                .execute(&mut c).unwrap();
+        }
+        let mut query = CollectionQuery::new(20, 0).unwrap();
+        query.filter = " ÉTé 100%_ ".into();
+        let page = store.collection(&query).await.unwrap();
+        assert_eq!(page.rows.len(), 20);
+        assert!(page.has_next);
+        assert_eq!(page.rows[0].id, "000");
+        query.offset = 40;
+        let page = store.collection(&query).await.unwrap();
+        assert_eq!(page.rows.len(), 5);
+        assert!(!page.has_next);
+        assert_eq!(page.rows[0].id, "040");
+        query.offset = 0;
+        query.filter = "003@EXAMPLE.TEST".into();
+        assert_eq!(store.collection(&query).await.unwrap().rows[0].id, "003");
+        query.filter = "' OR 1=1 --".into();
+        assert!(store.collection(&query).await.unwrap().rows.is_empty());
+        query.filter = "é".repeat(513);
+        assert!(store.collection(&query).await.is_err());
+        query.filter.clear();
+        for limit in [0, 101, u64::MAX] {
+            query.limit = limit;
+            assert!(store.collection(&query).await.is_err());
+        }
+        query.limit = 20;
+        query.offset = u64::MAX;
+        assert!(store.collection(&query).await.is_err());
     }
 }

@@ -356,7 +356,7 @@ async fn password_save(
 #[derive(Deserialize)]
 struct UsersQuery {
     filter: Option<String>,
-    page: Option<usize>,
+    page: Option<u64>,
 }
 async fn users(
     req: HttpRequest,
@@ -368,33 +368,24 @@ async fn users(
     if let Err(r) = admin(&session) {
         return *r;
     }
-    match store.list().await {
-        Ok(mut users) => {
-            let filter = query
-                .filter
-                .as_deref()
-                .unwrap_or("")
-                .trim()
-                .to_ascii_lowercase();
-            if !filter.is_empty() {
-                users.retain(|u| {
-                    u.name.to_ascii_lowercase().contains(&filter)
-                        || u.email.to_ascii_lowercase().contains(&filter)
-                })
-            }
-            users.sort_by(|a, b| a.email.cmp(&b.email).then(a.id.cmp(&b.id)));
-            let page = query.page.unwrap_or(1).max(1);
-            let total_pages = users.len().div_ceil(20).max(1);
-            let users = users
-                .into_iter()
-                .skip((page - 1) * 20)
-                .take(20)
-                .collect::<Vec<_>>();
+    let page = query.page.unwrap_or(1).max(1);
+    let mut window = match arc_auth_core::CollectionQuery::for_page(page, 20) {
+        Ok(window) => window,
+        Err(_) => return HttpResponse::BadRequest().body("Invalid page"),
+    };
+    window.filter = query.filter.clone().unwrap_or_default();
+    if window.validate().is_err() {
+        return HttpResponse::BadRequest().body("Invalid filter");
+    }
+    let filter = window.filter.trim().to_ascii_lowercase();
+    match store.collection(&window).await {
+        Ok(result) => {
+            let users = result.rows;
             let mut c = Context::new();
             c.insert("users", &users);
             c.insert("filter", &filter);
             c.insert("page", &page);
-            c.insert("total_pages", &total_pages);
+            c.insert("has_next", &result.has_next);
             c.insert("notice", &take_notice(&session));
             render(
                 &registry,

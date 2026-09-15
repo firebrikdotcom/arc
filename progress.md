@@ -1,6 +1,6 @@
 # Arc Project Progress
 
-**Last updated:** 2026-09-13
+**Last updated:** 2026-09-14
 **Current development version:** 0.8.7
 **Latest published version:** 0.8.6
 **Status:** v0.8.7 integrates the four security workstreams, validated locally with
@@ -17,12 +17,29 @@ take precedence when a claim here becomes stale.
 
 - Generated resource aggregates now reject names over 1024 UTF-8 bytes on create and
   rename, preserving accepted text verbatim and retaining blank-name validation.
-- Generated browser pagination saturates adversarial page offsets rather than
-  overflowing or wrapping. Collection storage reads remain unbounded.
+- The initial browser-pagination guard prevented arithmetic overflow. The
+  2026-09-14 follow-up rejects out-of-range windows before storage and replaces
+  load-all pagination with bounded queries.
 - Verified through isolated Docker Compose: 10 CLI tests, 5 generated-app tests,
   workspace/generated formatting, CLI/generated Clippy with warnings denied, and
   HTTP checks for oversized writes, unchanged projected state after rejection,
   escaped HTML-like names, and the maximum page number.
+
+## Bounded collections — verified 2026-09-14
+
+- SQLite/Postgres projection collections and SQLite identity collections apply
+  validated SQL windows; generated API/browser and user-admin paths use them.
+  Defaults are 20 rows, maximum 100, offset at most 1,000,000, filter at most
+  1024 UTF-8 bytes. Ordering is deterministic and navigation retains filters/sort.
+- Docker Compose verification passed: 301 workspace tests, locked Clippy,
+  formatting, doc tests/docs, debug and optimized release builds. The maintained
+  harness passed 202 focused storage/doc tests, 5 fresh generated-app tests,
+  generated static checks and real Chromium API/browser/admin navigation.
+- The required `bounded-collections` CI job runs the maintained harness. Existing
+  unrelated known-gap tests remain unchanged; internal `list`/`find_by` methods
+  retain their explicit all-results semantics.
+- The current audit exposed RUSTSEC-2026-0285; rustls is patched to 0.23.45 and the
+  audit passes with the existing workflow exceptions unchanged.
 
 ## Executive Summary
 
@@ -287,7 +304,11 @@ continues to track open controls and deployment decisions.
 
 Remaining security follow-ups:
 
-- [ ] Bound collection storage reads and extend adversarial coverage beyond the completed input-validation scope.
+- [x] Bound collection storage reads and expand adversarial coverage (2026-09-14):
+  SQLite/Postgres SQL windows, deterministic paging, API bounds and generated
+  browser/user-admin regressions pass. Locked workspace tests/Clippy/docs and
+  generated-app checks pass; CI now runs the dedicated Compose harness. See
+  [bounded collections](docsify-docs/bounded-collections.md).
 - [ ] Implement durable audit persistence and resolve deployment-specific disclosure, privacy and retention policies.
 - [ ] Resolve cached-session invalidation, room authorization and projection-origin validation gaps identified by the threat model.
 

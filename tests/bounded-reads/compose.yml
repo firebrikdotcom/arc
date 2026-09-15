@@ -1,0 +1,31 @@
+services:
+  verify:
+    build:
+      context: .
+    working_dir: /work
+    labels: {arc.project: nineties, arc.lane: bounded-reads}
+    environment:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+      CARGO_TARGET_DIR: /cache/target
+      ARC_POSTGRES_TEST_DATABASE_URL: postgres://arc:arc@postgres/arc
+    volumes:
+      - ../..:/work
+      - cache:/cache
+    ports: ['127.0.0.1:${ARC_BOUNDED_PORT:-18771}:18771']
+    command: ['sleep', 'infinity']
+  postgres:
+    image: postgres:16-alpine
+    labels: {arc.project: nineties, arc.lane: bounded-reads}
+    environment: {POSTGRES_USER: arc, POSTGRES_PASSWORD: arc, POSTGRES_DB: arc}
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U arc']
+      interval: 1s
+      timeout: 5s
+      retries: 30
+volumes:
+  cache:
+    labels: {arc.project: nineties, arc.lane: bounded-reads}
