@@ -48,6 +48,16 @@ compromise exceeds the protection offered by application-level HMACs.
 and prohibits direct Arc database outputs. [ADR 0002](architecture-decisions/0002-framework-upgrade-contract.md)
 defines framework versus application ownership. Current code takes precedence over older planning text.
 
+## Browser-session mitigation update (2026-09-14)
+
+The optional auth plugins now validate durable browser handles on protected HTTP
+requests. Role/active/password changes, logout and detected idle expiry revoke
+handles; replay remains denied after roles/accounts are restored. Store outages
+fail closed. See [configuration and boundaries](auth-plugins.md#browser-session-invalidation)
+and [coverage](security-test-coverage.md). TM-01/04 still require HTTPS, cookie scope,
+object/tenant authorization and review of application routes outside these plugins.
+The source-pinned observations below describe the earlier reviewed snapshot.
+
 ## Threats, controls and residual risks
 
 The following are source-observed controls and open risks, not completed mitigations. **High**

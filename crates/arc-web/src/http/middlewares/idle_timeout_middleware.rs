@@ -27,7 +27,7 @@ use actix_session::SessionExt;
 use actix_web::body::EitherBody;
 use actix_web::{
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
-    Error, HttpResponse,
+    web, Error, HttpResponse,
 };
 use futures_util::future::LocalBoxFuture;
 use std::future::{ready, Ready};
@@ -136,8 +136,29 @@ where
                     limit_secs = limit,
                     "session exceeded idle timeout — purging"
                 );
-                session.purge();
+                let browser_id = session.get::<String>("arc_auth_session_id").ok().flatten();
+                let store = req
+                    .app_data::<web::Data<dyn arc_auth_core::IdentityStore>>()
+                    .cloned();
                 return Box::pin(async move {
+                    if let Some(id) = browser_id {
+                        let result = match store {
+                            Some(store) => store.revoke_browser_session(&id).await,
+                            None => Err(arc_auth_core::AuthError::Store("missing store".into())),
+                        };
+                        if result.is_err() {
+                            tracing::error!(
+                                operation = "idle_revoke_browser_session",
+                                "browser authentication store unavailable"
+                            );
+                            return Ok(req.into_response(
+                                HttpResponse::ServiceUnavailable()
+                                    .body("Authentication is temporarily unavailable.")
+                                    .map_into_right_body(),
+                            ));
+                        }
+                    }
+                    session.purge();
                     Ok(req.into_response(
                         HttpResponse::Found()
                             .insert_header(("Location", "/signin?reason=idle"))

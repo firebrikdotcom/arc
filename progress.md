@@ -289,7 +289,8 @@ Remaining security follow-ups:
 
 - [ ] Bound collection storage reads and extend adversarial coverage beyond the completed input-validation scope.
 - [ ] Implement durable audit persistence and resolve deployment-specific disclosure, privacy and retention policies.
-- [ ] Resolve cached-session invalidation, room authorization and projection-origin validation gaps identified by the threat model.
+- [x] Implement durable optional-plugin browser-session invalidation after role, active-state and password changes, logout and detected idle expiry. Old cookies cannot regain access after identity restoration; store failures deny access. See [auth plugins](docsify-docs/auth-plugins.md).
+- [ ] Resolve room authorization and projection-origin validation gaps identified by the threat model.
 
 ### Phase 3 — Plugin and hook system
 

@@ -538,6 +538,7 @@ dependencies = [
  "diesel",
  "rand 0.8.8",
  "rpassword",
+ "tokio",
  "uuid",
 ]
 
@@ -561,6 +562,7 @@ dependencies = [
  "actix",
  "actix-session 0.10.1",
  "actix-web",
+ "arc-auth-admin",
  "arc-auth-core",
  "arc-auth-db",
  "arc-auth-session",
@@ -584,6 +586,7 @@ dependencies = [
  "async-trait",
  "futures-util",
  "serde",
+ "tracing",
 ]
 
 [[package]]
@@ -665,6 +668,7 @@ dependencies = [
  "actix-web",
  "actix-web-actors",
  "actix-web-lab",
+ "arc-auth-core",
  "arc-core",
  "arc-es-nats",
  "arc-es-postgres",
@@ -3048,9 +3052,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.44"
+version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6725596c3f2c3a0aef021139e145d4eafe314a6623e4680ca83852b2c67ab2ba"
+checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "once_cell",
  "ring",

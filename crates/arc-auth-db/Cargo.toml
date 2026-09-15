@@ -16,3 +16,6 @@ diesel.workspace = true
 rand.workspace = true
 rpassword.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

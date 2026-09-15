@@ -15,3 +15,4 @@ actix-web.workspace = true
 async-trait.workspace = true
 futures-util.workspace = true
 serde.workspace = true
+tracing.workspace = true

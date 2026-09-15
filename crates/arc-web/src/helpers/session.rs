@@ -124,3 +124,18 @@ pub fn get_session_message(session: &Session, is_json: bool) -> (String, String)
 
     ("success".to_string(), "".to_string())
 }
+
+/// Shared cookie lifetime and absolute browser-handle lifetime. This is an
+/// authentication deadline, not an audit/privacy retention policy.
+pub fn browser_session_ttl_seconds() -> std::io::Result<u32> {
+    let seconds = std::env::var("ARC_BROWSER_SESSION_TTL_SECONDS")
+        .unwrap_or_else(|_| "86400".into())
+        .parse::<u32>()
+        .map_err(|_| std::io::Error::other("invalid browser session lifetime"))?;
+    if seconds == 0 {
+        return Err(std::io::Error::other(
+            "browser session lifetime must be positive",
+        ));
+    }
+    Ok(seconds)
+}

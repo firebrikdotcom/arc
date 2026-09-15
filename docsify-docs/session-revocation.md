@@ -5,6 +5,10 @@ until natural expiry (typically 24h) and the framework cannot prove a user
 is "logged out". HIPAA §164.312(d) requires immediate session revocation
 on breach response — this trait is the hook.
 
+Optional browser auth plugins use a separate durable handle table owned by
+`arc-auth-db`; see [browser session invalidation](auth-plugins.md#browser-session-invalidation).
+Browser logout and role/account changes do not revoke JWT records through this table.
+
 ## Flow
 
 Three integration points:

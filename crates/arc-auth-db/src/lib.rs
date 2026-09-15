@@ -16,6 +16,18 @@ use uuid::Uuid;
 const IDENTITY_ROLES_MIGRATION: &str =
     include_str!("../migrations/90000000000000_identity_roles/up.sql");
 
+struct BrowserStoreError(AuthError);
+impl From<AuthError> for BrowserStoreError {
+    fn from(error: AuthError) -> Self {
+        Self(error)
+    }
+}
+impl From<diesel::result::Error> for BrowserStoreError {
+    fn from(error: diesel::result::Error) -> Self {
+        Self(AuthError::Store(error.to_string()))
+    }
+}
+
 #[derive(Clone)]
 pub struct DbIdentityStore {
     database_url: String,
@@ -98,6 +110,48 @@ fn get_row(connection: &mut SqliteConnection, id: &str) -> Result<Option<UserRow
 
 #[async_trait]
 impl IdentityStore for DbIdentityStore {
+    async fn authenticate_browser(
+        &self,
+        email: &str,
+        password: &str,
+        ttl_seconds: u32,
+    ) -> Result<(Identity, String), AuthError> {
+        if ttl_seconds == 0 {
+            return Err(AuthError::InvalidInput(
+                "browser session lifetime must be positive".into(),
+            ));
+        }
+        let mut c = self.connect()?;
+        c.immediate_transaction::<_, BrowserStoreError, _>(|c| {
+            let row = sql_query("SELECT id,name,email,password_hash,active FROM users WHERE email = ? COLLATE NOCASE AND active = 1")
+                .bind::<diesel::sql_types::Text,_>(email.trim()).get_result::<UserRow>(c).optional()?.ok_or(AuthError::InvalidCredentials)?;
+            let parsed = PasswordHash::new(&row.password_hash).map_err(|_| AuthError::InvalidCredentials)?;
+            Argon2::default().verify_password(password.as_bytes(), &parsed).map_err(|_| AuthError::InvalidCredentials)?;
+            let user = identity(c, row)?;
+            let id = Uuid::new_v4().to_string();
+            sql_query("DELETE FROM browser_sessions WHERE expires_at <= ?").bind::<diesel::sql_types::BigInt,_>(now_us()).execute(c)?;
+            sql_query("INSERT INTO browser_sessions (id,user_id,expires_at) VALUES (?,?,?)")
+                .bind::<diesel::sql_types::Text,_>(&id).bind::<diesel::sql_types::Text,_>(&user.id)
+                .bind::<diesel::sql_types::BigInt,_>(now_us() + i64::from(ttl_seconds) * 1_000_000).execute(c)?;
+            Ok((user, id))
+        }).map_err(|e| e.0)
+    }
+    async fn browser_identity(&self, session_id: &str) -> Result<Option<Identity>, AuthError> {
+        let mut c = self.connect()?;
+        c.transaction::<_, BrowserStoreError, _>(|c| {
+            let row = sql_query("SELECT users.id,name,email,password_hash,active FROM users JOIN browser_sessions ON users.id=browser_sessions.user_id WHERE browser_sessions.id=? AND expires_at>? AND active=1")
+                .bind::<diesel::sql_types::Text,_>(session_id).bind::<diesel::sql_types::BigInt,_>(now_us()).get_result::<UserRow>(c).optional()?;
+            Ok(row.map(|row| identity(c, row)).transpose()?)
+        }).map_err(|e| e.0)
+    }
+    async fn revoke_browser_session(&self, session_id: &str) -> Result<(), AuthError> {
+        sql_query("DELETE FROM browser_sessions WHERE id=?")
+            .bind::<diesel::sql_types::Text, _>(session_id)
+            .execute(&mut self.connect()?)
+            .map_err(|e| AuthError::Store(e.to_string()))?;
+        Ok(())
+    }
+
     async fn authenticate(&self, email: &str, password: &str) -> Result<Identity, AuthError> {
         let mut c = self.connect()?;
         let row=sql_query("SELECT id,name,email,password_hash,active FROM users WHERE email = ? COLLATE NOCASE AND active = 1").bind::<diesel::sql_types::Text,_>(email.trim()).get_result::<UserRow>(&mut c).optional().map_err(|e|AuthError::Store(e.to_string()))?.ok_or(AuthError::InvalidCredentials)?;
@@ -168,12 +222,19 @@ impl IdentityStore for DbIdentityStore {
     }
     async fn change_password(&self, id: &str, password: &str) -> Result<(), AuthError> {
         let mut c = self.connect()?;
-        sql_query("UPDATE users SET password_hash=?,updated_at=? WHERE id=?")
-            .bind::<diesel::sql_types::Text, _>(hash(password)?)
-            .bind::<diesel::sql_types::BigInt, _>(now_us())
-            .bind::<diesel::sql_types::Text, _>(id)
-            .execute(&mut c)
-            .map_err(|e| AuthError::Store(e.to_string()))?;
+        let password_hash = hash(password)?;
+        c.transaction::<_, diesel::result::Error, _>(|c| {
+            sql_query("UPDATE users SET password_hash=?,updated_at=? WHERE id=?")
+                .bind::<diesel::sql_types::Text, _>(&password_hash)
+                .bind::<diesel::sql_types::BigInt, _>(now_us())
+                .bind::<diesel::sql_types::Text, _>(id)
+                .execute(c)?;
+            sql_query("DELETE FROM browser_sessions WHERE user_id=?")
+                .bind::<diesel::sql_types::Text, _>(id)
+                .execute(c)?;
+            Ok(())
+        })
+        .map_err(|e| AuthError::Store(e.to_string()))?;
         Ok(())
     }
     async fn set_roles(&self, id: &str, assigned: &[String]) -> Result<Identity, AuthError> {
@@ -182,6 +243,9 @@ impl IdentityStore for DbIdentityStore {
             ensure_not_final_admin(&mut c, id)?;
         }
         c.transaction::<_, diesel::result::Error, _>(|c| {
+            sql_query("DELETE FROM browser_sessions WHERE user_id=?")
+                .bind::<diesel::sql_types::Text, _>(id)
+                .execute(c)?;
             sql_query("DELETE FROM user_roles WHERE user_id=?")
                 .bind::<diesel::sql_types::Text, _>(id)
                 .execute(c)?;
@@ -203,11 +267,18 @@ impl IdentityStore for DbIdentityStore {
         if !active {
             ensure_not_final_admin(&mut c, id)?;
         }
-        let changed = sql_query("UPDATE users SET active=?,updated_at=? WHERE id=?")
-            .bind::<diesel::sql_types::Integer, _>(i32::from(active))
-            .bind::<diesel::sql_types::BigInt, _>(now_us())
-            .bind::<diesel::sql_types::Text, _>(id)
-            .execute(&mut c)
+        let changed = c
+            .transaction::<_, diesel::result::Error, _>(|c| {
+                let changed = sql_query("UPDATE users SET active=?,updated_at=? WHERE id=?")
+                    .bind::<diesel::sql_types::Integer, _>(i32::from(active))
+                    .bind::<diesel::sql_types::BigInt, _>(now_us())
+                    .bind::<diesel::sql_types::Text, _>(id)
+                    .execute(c)?;
+                sql_query("DELETE FROM browser_sessions WHERE user_id=?")
+                    .bind::<diesel::sql_types::Text, _>(id)
+                    .execute(c)?;
+                Ok(changed)
+            })
             .map_err(|e| AuthError::Store(e.to_string()))?;
         if changed == 0 {
             return Err(AuthError::NotFound);
@@ -267,6 +338,10 @@ impl ArcPlugin for DbIdentityPlugin {
         let mut c = SqliteConnection::establish(context.database_url).map_err(io::Error::other)?;
         c.batch_execute(IDENTITY_ROLES_MIGRATION)
             .map_err(io::Error::other)?;
+        c.batch_execute(include_str!(
+            "../migrations/90000000000001_browser_sessions/up.sql"
+        ))
+        .map_err(io::Error::other)?;
         if !self.store.has_users().await.map_err(io::Error::other)? {
             let name = bootstrap_value("ARC_SETUP_ADMIN_NAME", "Administrator name", false)?;
             let email = bootstrap_value("ARC_SETUP_ADMIN_EMAIL", "Administrator email", false)?;
@@ -319,5 +394,91 @@ mod tests {
             "admin@example.test"
         );
         assert!(hash("password").is_ok());
+    }
+}
+
+#[cfg(test)]
+mod browser_tests {
+    use super::*;
+    struct Database(String);
+    impl Drop for Database {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    #[tokio::test]
+    async fn migration_upgrade_and_durable_invalidation() {
+        let db = Database(format!(
+            "/tmp/arc-nineties-session-{}.sqlite",
+            Uuid::new_v4()
+        ));
+        let store = DbIdentityStore::new(&db.0);
+        let mut c = store.connect().unwrap();
+        c.batch_execute(IDENTITY_ROLES_MIGRATION).unwrap();
+        let user = store
+            .create_user("User", "user@example.test", "password", &["user".into()])
+            .await
+            .unwrap();
+        for _ in 0..2 {
+            c.batch_execute(include_str!(
+                "../migrations/90000000000001_browser_sessions/up.sql"
+            ))
+            .unwrap();
+        }
+        assert_eq!(store.get(&user.id).await.unwrap(), Some(user.clone()));
+        for change in ["roles", "active", "password"] {
+            let (_, first) = store
+                .authenticate_browser("user@example.test", "password", 86400)
+                .await
+                .unwrap();
+            let (_, second) = store
+                .authenticate_browser("user@example.test", "password", 86400)
+                .await
+                .unwrap();
+            assert!(DbIdentityStore::new(&db.0)
+                .browser_identity(&first)
+                .await
+                .unwrap()
+                .is_some());
+            match change {
+                "roles" => {
+                    store.set_roles(&user.id, &[]).await.unwrap();
+                    store.set_roles(&user.id, &["user".into()]).await.unwrap();
+                }
+                "active" => {
+                    store.set_active(&user.id, false).await.unwrap();
+                    store.set_active(&user.id, true).await.unwrap();
+                }
+                _ => {
+                    store.change_password(&user.id, "password").await.unwrap();
+                }
+            }
+            assert!(store.browser_identity(&first).await.unwrap().is_none());
+            assert!(store.browser_identity(&second).await.unwrap().is_none());
+        }
+        let (_, first) = store
+            .authenticate_browser("user@example.test", "password", 86400)
+            .await
+            .unwrap();
+        let (_, second) = store
+            .authenticate_browser("user@example.test", "password", 86400)
+            .await
+            .unwrap();
+        store.revoke_browser_session(&first).await.unwrap();
+        store.revoke_browser_session(&first).await.unwrap();
+        assert!(store.browser_identity(&first).await.unwrap().is_none());
+        assert!(store.browser_identity(&second).await.unwrap().is_some());
+        c.batch_execute("UPDATE browser_sessions SET expires_at=0")
+            .unwrap();
+        assert!(store.browser_identity(&second).await.unwrap().is_none());
+        assert!(store
+            .authenticate_browser("user@example.test", "password", 0)
+            .await
+            .is_err());
+        assert!(store
+            .authenticate_browser("user@example.test", "wrong", 60)
+            .await
+            .is_err());
+        assert!(store.browser_identity("unknown").await.unwrap().is_none());
     }
 }

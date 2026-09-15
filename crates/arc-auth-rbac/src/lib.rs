@@ -1,4 +1,3 @@
-use actix_session::SessionExt;
 use actix_web::{
     body::EitherBody,
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
@@ -86,21 +85,15 @@ where
         let roles = self.roles.clone();
         let service = self.service.clone();
         Box::pin(async move {
-            let session_identity = req
-                .get_session()
-                .get::<Identity>("arc_auth_identity")
-                .ok()
-                .flatten();
             let actor_id = { req.extensions().get::<String>().cloned() };
-            let identity = if session_identity.is_some() {
-                session_identity
-            } else if let Some(id) = actor_id {
+            let identity = if let Some(id) = actor_id {
                 match req.app_data::<web::Data<dyn arc_auth_core::IdentityStore>>() {
                     Some(store) => store.get(&id).await.ok().flatten(),
                     None => None,
                 }
             } else {
-                None
+                // Only accept the identity validated by RequireSession on this request.
+                req.extensions().get::<Identity>().cloned()
             };
             let required = roles.iter().map(String::as_str).collect::<Vec<_>>();
             if identity

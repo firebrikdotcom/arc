@@ -5,7 +5,7 @@ use actix_web::{cookie::Key, web, App, HttpResponse, HttpServer};
 use arc_auth_core::IdentityStore;
 use arc_auth_db::{DbIdentityPlugin, DbIdentityStore};
 use arc_auth_rbac::RequireRoles;
-use arc_auth_session::{cache_identity, sign_out, RequireSession};
+use arc_auth_session::{authenticate, sign_out, RequireSession};
 use arc_core::session::{InMemorySessionStore, SessionRecord, SessionStore};
 use arc_web::{
     helpers::jwt::create_token,
@@ -51,21 +51,24 @@ async fn main() -> std::io::Result<()> {
             .await
             .unwrap();
     }
+    let outage_path = path.clone();
     let identities: Arc<dyn IdentityStore> = Arc::new(store);
     let sessions: Arc<dyn SessionStore> = Arc::new(InMemorySessionStore::new());
     let sockets = WsServer::new().start();
     let key = Key::generate();
     let server = HttpServer::new(move || App::new()
+        .app_data(web::Data::new(outage_path.clone()))
         .app_data(web::Data::from(identities.clone()))
         .app_data(web::Data::from(sessions.clone()))
         .app_data(web::Data::new(sockets.clone()))
         .wrap(SessionMiddleware::builder(CookieSessionStore::default(), key.clone()).cookie_secure(false).cookie_http_only(true).build())
         .route("/signin", web::get().to(|| async { HttpResponse::Ok().content_type("text/html").body("<main>Sign in required</main>") }))
+        .configure(arc_auth_admin::routes)
+        .route("/fixture/csrf", web::get().to(|session: Session| async move { HttpResponse::Ok().body(arc_web::helpers::csrf::get_csrf_token(&session)) }))
         .route("/health", web::get().to(|| async { HttpResponse::Ok().finish() }))
         .route("/", web::get().to(|| async { HttpResponse::Ok().content_type("text/html").body("<main>Security test fixture</main>") }))
         .route("/fixture/login/{name}", web::get().to(|name: web::Path<String>, session: Session, store: web::Data<dyn IdentityStore>, sessions: web::Data<dyn SessionStore>| async move {
-            let user = store.authenticate(&format!("{}@example.test", name.as_str()), "test-only-password").await.unwrap();
-            cache_identity(&session, &user);
+            let user = authenticate(&session, store.get_ref(), &format!("{}@example.test", name.as_str()), "test-only-password").await.unwrap();
             let (token, jti) = create_token(&user.id).unwrap();
             sessions.record_session(SessionRecord { jti, actor_id: user.id.clone(), created_at_us: 1, expires_at_us: i64::MAX, revoked_at_us: None }).await.unwrap();
             HttpResponse::Ok().json(serde_json::json!({"id":user.id,"token":token}))
@@ -80,7 +83,14 @@ async fn main() -> std::io::Result<()> {
             }
             HttpResponse::NoContent().finish()
         }))
-        .route("/fixture/logout", web::post().to(|session: Session| async move { sign_out(&session); HttpResponse::NoContent().finish() }))
+        .route("/fixture/logout", web::post().to(|session: Session, store: web::Data<dyn IdentityStore>| async move { if sign_out(&session, store.get_ref()).await.is_err() { return HttpResponse::ServiceUnavailable().finish(); } HttpResponse::NoContent().finish() }))
+        .route("/fixture/outage/{state}", web::post().to(|state: web::Path<String>, path: web::Data<String>| async move {
+            let offline = format!("{}.offline", path.get_ref());
+            if state.as_str() == "on" { std::fs::rename(path.get_ref(), &offline).unwrap(); }
+            else { std::fs::rename(&offline, path.get_ref()).unwrap(); }
+            HttpResponse::NoContent().finish()
+        }))
+        .service(web::resource("/resources").wrap(RequireSession).wrap(IdleTimeoutMiddleware::new(900)).route(web::get().to(|| async { HttpResponse::Ok().body("resource-data") })))
         .route("/fixture/expire", web::post().to(|session: Session| async move { session.insert("last_active_at", 1u64).unwrap(); HttpResponse::NoContent().finish() }))
         .service(web::scope("/browser").wrap(RequireRoles::new(&["admin"])).wrap(RequireSession).wrap(IdleTimeoutMiddleware::new(900)).route("/admin", web::get().to(|| async { HttpResponse::Ok().body("admin-data") })))
         .service(web::scope("/api").wrap(RequireRoles::new(&["admin"])).wrap(JwtMiddleware).route("/admin", web::get().to(|| async { HttpResponse::Ok().body("admin-data") })))
