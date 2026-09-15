@@ -4,7 +4,7 @@ use super::projector::{{CONSTANT}}_VIEW;
 use actix_session::Session;
 use actix_web::{web, HttpRequest, HttpResponse};
 use arc_core::command_bus::{CommandBus, CommandContext};
-use arc_core::read_model_store::ReadModelStore;
+use arc_core::read_model_store::{CollectionOrder, CollectionQuery, ReadModelStore};
 use arc_web::helpers::csrf;
 use serde::{Deserialize, Serialize};
 use tera::Context;
@@ -42,7 +42,7 @@ fn render(registry:&UiRegistry, req:&HttpRequest, session:&Session, name: &'stat
 struct ListQuery {
     filter: Option<String>,
     sort: Option<String>,
-    page: Option<usize>,
+    page: Option<u64>,
 }
 
 async fn collection(
@@ -52,47 +52,27 @@ async fn collection(
     store: web::Data<dyn ReadModelStore>,
     registry: web::Data<UiRegistry>,
 ) -> HttpResponse {
-    match store.list({{CONSTANT}}_VIEW).await {
-        Ok(mut rows) => {
-            if let Some(filter) = query.filter.as_deref().filter(|value| !value.is_empty()) {
-                let needle = filter.to_ascii_lowercase();
-                rows.retain(|row| {
-                    row.get("name")
-                        .and_then(|v| v.as_str())
-                        .is_some_and(|name| name.to_ascii_lowercase().contains(&needle))
-                });
-            }
-            if query.sort.as_deref() == Some("name_desc") {
-                rows.sort_by_key(|row| {
-                    std::cmp::Reverse(
-                        row.get("name")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string(),
-                    )
-                });
-            } else {
-                rows.sort_by_key(|row| {
-                    row.get("name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string()
-                });
-            }
-            let page = query.page.unwrap_or(1).max(1);
-            let per_page = 20;
-            let offset = page_offset(page);
-            let total = rows.len();
-            let rows = rows
-                .into_iter()
-                .skip(offset)
-                .take(per_page)
-                .collect::<Vec<_>>();
+    let page = query.page.unwrap_or(1).max(1);
+    let mut window = match CollectionQuery::for_page(page, 20) {
+        Ok(window) => window,
+        Err(_) => return HttpResponse::BadRequest().body("Invalid page"),
+    };
+    window.filter = query.filter.clone().unwrap_or_default();
+    window.order = match query.sort.as_deref().unwrap_or("name_asc") {
+        "name_asc" => CollectionOrder::NameAsc,
+        "name_desc" => CollectionOrder::NameDesc,
+        _ => return HttpResponse::BadRequest().body("Invalid sort"),
+    };
+    if window.validate().is_err() { return HttpResponse::BadRequest().body("Invalid filter"); }
+    match store.collection({{CONSTANT}}_VIEW, &window).await {
+        Ok(result) => {
+            let rows = result.rows;
             let mut context = Context::new();
             context.insert("rows", &rows);
             context.insert("filter", &query.filter);
             context.insert("page", &page);
-            context.insert("has_next", &(offset.saturating_add(per_page) < total));
+            context.insert("has_next", &result.has_next);
+            context.insert("sort", &query.sort.as_deref().unwrap_or("name_asc"));
             render(
                 &registry, &req, &session, "capabilities/app-{{module}}/collection.html",
                 context,
@@ -307,19 +287,16 @@ pub fn config(cfg: &mut web::ServiceConfig) {
     );
 }
 
-// Saturation makes out-of-range pages empty instead of panicking or wrapping.
-fn page_offset(page: usize) -> usize {
-    page.max(1).saturating_sub(1).saturating_mul(20)
-}
-
 #[cfg(test)]
 mod input_security_tests {
     use super::*;
 
     #[test]
-    fn adversarial_page_numbers_do_not_wrap() {
-        for (page, expected) in [(0, 0), (1, 0), (2, 20), (usize::MAX, usize::MAX), (usize::MAX / 20 + 2, usize::MAX)] {
-            assert_eq!(page_offset(page), expected);
+    fn adversarial_pages_are_rejected_before_storage() {
+        assert_eq!(CollectionQuery::for_page(0, 20).unwrap().offset, 0);
+        assert_eq!(CollectionQuery::for_page(2, 20).unwrap().offset, 20);
+        for page in [u64::MAX, u64::MAX / 20 + 2, 50_002] {
+            assert!(CollectionQuery::for_page(page, 20).is_err());
         }
     }
 }

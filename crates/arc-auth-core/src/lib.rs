@@ -1,3 +1,4 @@
+pub use arc_core::read_model_store::{CollectionPage, CollectionQuery};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -36,6 +37,11 @@ pub trait IdentityStore: Send + Sync {
     async fn authenticate(&self, email: &str, password: &str) -> Result<Identity, AuthError>;
     async fn get(&self, id: &str) -> Result<Option<Identity>, AuthError>;
     async fn list(&self) -> Result<Vec<Identity>, AuthError>;
+    /// Bounded users ordered by email and ID, matching name or email.
+    async fn collection(
+        &self,
+        query: &CollectionQuery,
+    ) -> Result<CollectionPage<Identity>, AuthError>;
     async fn has_users(&self) -> Result<bool, AuthError>;
     async fn create_user(
         &self,

@@ -94,3 +94,14 @@ Older API fixtures now register their JWT sessions before asserting authenticate
 profile and audit behavior. The E2E launcher honors `CARGO_TARGET_DIR` and an
 optional system Chromium executable. This is local integration evidence; it does
 not claim remote CI, package publication, or resolution of all threat-model risks.
+
+## Bounded collection follow-up (2026-09-14)
+
+Storage and generated collection regression coverage is documented in
+[bounded collections](bounded-collections.md). Other known-gap characterization
+checks remain unchanged; collection hardening does not resolve session, socket,
+audit, or projection-origin gaps.
+
+The 2026-09-14 dependency audit also detected RUSTSEC-2026-0285 in the
+existing rustls pin. Cargo.lock now pins the fixed patch 0.23.45. The audit
+passes with the existing workflow exceptions unchanged.
