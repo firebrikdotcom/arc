@@ -16,7 +16,6 @@ use std::io;
 use std::sync::Mutex;
 use tracing::{info, warn};
 
-use arc_core::access_log::{AccessLogger, NoOpAccessLogger};
 use arc_core::aggregate::Aggregate;
 use arc_core::command_bus::{CommandBus, SnapshotPolicy};
 #[cfg(feature = "nats")]
@@ -190,9 +189,8 @@ pub(crate) async fn run(
     }
     let aggregate_runtimes = Arc::new(aggregate_runtimes);
 
-    // Default to NoOpAccessLogger for non-regulated deployments. Production
-    // PHI/PCI deployments swap this for a JetStream- or DB-backed sink.
-    let access_logger: Arc<dyn AccessLogger> = Arc::new(NoOpAccessLogger);
+    let access_logger =
+        crate::helpers::access_log_config::build_access_logger(|key| env::var(key).ok()).await?;
     let access_logger_data = web::Data::from(access_logger);
 
     // Server-side JWT session registry. SQLite-only today; under a non-SQLite

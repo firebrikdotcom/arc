@@ -13,6 +13,11 @@ open-gap reproductions. TM-03 missing-jti and missing-store paths are fixed in t
 branch and tested over HTTP; the source-pinned assessment below describes the
 original reviewed revision. Other risks remain open.
 
+Durable audit update (2026-09-14): TM-13 now has an opt-in SQLite journal with
+startup validation and commit acknowledgement. Noop remains the default; coverage,
+access control and deployment retention decisions remain open. See the
+[implementation and operations update](access-logging-production-review.md#durable-implementation-update--2026-09-14).
+
 ## Scope and assets
 
 Covers the reusable framework, thin app, optional auth plugins, generated apps, SQLite/Postgres,

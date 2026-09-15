@@ -14,7 +14,7 @@ weakness; it does not certify a mitigation or approve a release.
 | TM-08/09 distributed routing | `crates/arc-app/tests/benthos_projection_routing.rs` | Existing real NATS → Redpanda Connect → Arc projection test passed with actual binaries, without prerequisite skips. Broker crash/restart recovery remains untested by this check. |
 | TM-11 WebSockets | `tests/security/browser.spec.mjs` | Real Chromium WebSockets/Arc actors: user-targeted broadcasts isolate identities, but anonymous private-room subscriptions and cross-user room delivery succeed (GAP). |
 | TM-13 access audit | `crates/arc-web/tests/security_http.rs::audit_http_failures_and_stalled_sink_gap` | Real TCP with controlled sink: PHI/PCI errors return 503 without payload; PII fails open; stalled PHI request stays pending until released. The 100ms observation is not a production timeout policy. |
-| TM-13 durability | No shipped durable sink | BLOCKED: persistence, restart, restore and durable receipts cannot be proven using a fake/no-op sink. No sink or retention policy added. |
+| TM-13 durability | SQLite sink unit tests, `durable_access_http`, `tests/durable-audit/` browser fixture | Dedicated commit persistence, reopen, lock/disk PHI rejection, overload and bounded retention hook. Browser process-restart receipts are verified separately. Deployment backup restore, disclosure inventory and retention policies remain open. |
 
 ## Repeatable normal checks
 
