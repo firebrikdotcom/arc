@@ -25,8 +25,8 @@
 //!
 //! Default implementations in tests and non-regulated apps use
 //! [`NoOpAccessLogger`] which validates inputs but discards them. Real
-//! deployments requiring persistence must supply a durable implementation;
-//! no JetStream- or DB-backed access logger is shipped.
+//! deployments can select the dedicated `arc-es-sqlite::SqliteAccessLogger`.
+//! Coverage remains opt-in at each disclosure boundary.
 
 use crate::audit::now_us;
 use async_trait::async_trait;
@@ -222,7 +222,7 @@ impl AccessLogEntry {
 /// - [`NoOpAccessLogger`] — validates and discards (default in tests, non-PHI apps)
 /// - `RecordingAccessLogger` — keeps entries in memory for assertions (test-utils)
 ///
-/// No durable implementation is shipped.
+/// - `arc-es-sqlite::SqliteAccessLogger` — dedicated durable SQLite journal
 #[async_trait]
 pub trait AccessLogger: Send + Sync {
     /// Log a read. Implementations validate the input, record it (or not),

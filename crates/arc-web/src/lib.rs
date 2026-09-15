@@ -22,6 +22,7 @@ use tracing::{debug, error, info};
 
 pub mod helpers {
     pub mod access_log;
+    pub mod access_log_config;
     pub mod audit_context;
     pub mod config;
     pub mod csrf;

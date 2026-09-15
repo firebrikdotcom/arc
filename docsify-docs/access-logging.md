@@ -2,7 +2,8 @@
 
 `AccessLogger` is an explicit read-audit interface, separate from write-side
 [Audit Metadata](audit-metadata.md). **The default runtime discards access-log
-records. No durable access logger ships in this workspace.** Selecting Postgres,
+records unless configured with `ACCESS_LOG_DRIVER=sqlite`.** The shipped dedicated
+SQLite journal acknowledges committed inserts. Selecting Postgres,
 NATS, or Benthos does not enable read-audit persistence. These primitives and
 classification names do not establish regulatory compliance.
 
@@ -94,7 +95,11 @@ Debug-printable; do not dump them into general diagnostics.
 
 ## Runtime integration
 
-`arc-web/src/commands/serve.rs` creates `NoOpAccessLogger` in every environment.
+`arc-web/src/commands/serve.rs` selects the logger at startup. Set
+`ACCESS_LOG_DRIVER=sqlite`, `ACCESS_LOG_REQUIRED=true` and
+`ACCESS_LOG_SQLITE_PATH` to a dedicated persistent disk file. Invalid or unavailable
+configured sinks abort startup. See the [operations guide](access-logging-production-review.md)
+for migration, acknowledgement, metadata flags, lock bounds and retention hooks.
 An application can supply its own implementation through the existing builder
 state registration seam, using the **trait-object type**:
 
@@ -108,8 +113,8 @@ let app = arc_web::ArcApp::builder().register_data(logger);
 `register_data` wraps the Arc in Actix `web::Data`. Registered data is applied
 after the default logger, replacing the same type at application scope. Registering
 only `Arc<MyLogger>` does not satisfy `web::Data<dyn AccessLogger>`. A nearer route
-scope can override application state; verify the actual served route. No environment
-variable chooses a persistent access sink, and startup does not verify durability.
+scope can override application state; verify the actual served route. The required
+flag guards built-in startup selection, not application or plugin overrides.
 
 `NoOpAccessLogger` validates then discards. `RecordingAccessLogger`, available with
 `arc-core/test-utils`, keeps records in an unbounded in-memory vector for tests;

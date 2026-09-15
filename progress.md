@@ -279,8 +279,9 @@ continues to track open controls and deployment decisions.
 - [x] Production review of access-log persistence and operations (2026-09-13): see
   [findings and operator runbook](docsify-docs/access-logging-production-review.md).
   Wrapper bypasses and diagnostic disclosure fixed; focused Compose tests and
-  all-feature static analysis passed. Durable sink implementation, disclosure
-  coverage, and deployment-specific privacy/retention decisions remain open.
+  all-feature static analysis passed. The subsequent durable SQLite implementation
+  is documented in the same guide; disclosure coverage and deployment-specific
+  privacy/retention decisions remain open.
 - [x] Source-grounded [threat model](docsify-docs/threat-model.md) and actionable
   [release security checklist](docsify-docs/release-security-checklist.md) documented (2026-09-12).
   Documentation is complete; identified risks, release gates and deployment validation remain open.
@@ -288,7 +289,8 @@ continues to track open controls and deployment decisions.
 Remaining security follow-ups:
 
 - [ ] Bound collection storage reads and extend adversarial coverage beyond the completed input-validation scope.
-- [ ] Implement durable audit persistence and resolve deployment-specific disclosure, privacy and retention policies.
+- [x] Durable read-audit persistence (2026-09-14): opt-in SQLite journal, required startup selection, migration/reopen, metadata minimization and bounded retention hook. Verified with locked workspace tests, HTTP lock/disk PHI rejection, real Chromium process-restart receipts, Clippy and Rust docs. See [operations](docsify-docs/access-logging-production-review.md).
+- [ ] Deployment audit policy: approve disclosure inventory, identifiers, retention/legal holds, storage access/encryption, archival and backup restore/erasure. No default legal duration or expanded disclosure scope is imposed.
 - [ ] Resolve cached-session invalidation, room authorization and projection-origin validation gaps identified by the threat model.
 
 ### Phase 3 — Plugin and hook system

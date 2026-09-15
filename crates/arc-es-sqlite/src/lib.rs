@@ -27,6 +27,9 @@ use uuid::Uuid;
 // Re-export for convenience
 pub use arc_core::{Deserialize, Serialize};
 
+pub mod access_log;
+pub use access_log::{AccessLogPrivacy, SqliteAccessLogger};
+
 pub mod session;
 pub use session::SqliteSessionStore;
 

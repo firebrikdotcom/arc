@@ -1,0 +1,25 @@
+# Backend build/test execution only; the fixture is deliberately synthetic.
+services:
+  verify:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${ARC_AUDIT_TEST_IMAGE:-arc-nineties-durable-audit-test:local}
+    working_dir: /work
+    labels:
+      arc.project: nineties
+      arc.lane: durable-audit
+    environment:
+      CARGO_BUILD_JOBS: '2'
+      CARGO_TARGET_DIR: /cache/target
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+      ACCESS_LOG_DRIVER: sqlite
+      ACCESS_LOG_REQUIRED: 'true'
+      ACCESS_LOG_SQLITE_PATH: /cache/browser-audit.db
+      ACCESS_LOG_BUSY_TIMEOUT_MS: '25'
+    volumes:
+      - ../..:/work
+      - ${ARC_AUDIT_TEST_CACHE:-../../target/verification-cache}:/cache
+    ports:
+      - '127.0.0.1:18784:18784'
