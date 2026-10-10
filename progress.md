@@ -78,9 +78,9 @@ tested, sole durable router. The removed `arc-worker` is historical.
    - Exercise upgrades against a generated application such as `arc-test-1`.
 
 3. **Keep user documentation canonical and current**
-   - The `docsify-docs/` user guide now covers application anatomy, workflows, endpoints,
+   - The `docs/` user guide now covers application anatomy, workflows, endpoints,
      resources, UI, configuration, testing, packages, `web::Data`, and the command bus.
-   - `docsify-docs/` is the canonical user-facing source.
+   - `docs/` is the canonical user-facing source.
    - CI checks release-version references and implemented routing claims against source.
 
 4. **Harden CI and audits**
@@ -277,7 +277,7 @@ and Benthos owns durable routing, retries, dedupe, dead-lettering, and HTTP/NATS
 - [ ] `docs/10-event-sourcing-implementation-guide.md`: replace pre-implementation phases.
 - [ ] `docs/11-event-sourcing-api-reference.md`: align traits with current source.
 - [ ] Label old QA, implementation, and planning documents as historical.
-- [x] Rewrite `docsify-docs/` as the focused user-facing guide.
+- [x] Rewrite `docs/` as the focused user-facing guide.
 - [ ] Consolidate deployment so only the maintained Docsify source is presented to users.
 
 ## Remaining Product Roadmap
@@ -289,20 +289,20 @@ The four dispatched security workstreams below are complete, merged into `master
 and included in the local `v0.8.7` tag (2026-09-13). The source-grounded threat model
 continues to track open controls and deployment decisions.
 
-- [x] Security headers and a documented CSP posture: shared runtime defaults, explicit HTML MIME types, configurable enforced/report-only CSP and opt-in HSTS. Verified with focused Rust tests, generated auth/API/browser flows, and Vite/Turbo asset checks; see [Security Headers and CSP](docsify-docs/security-headers.md).
+- [x] Security headers and a documented CSP posture: shared runtime defaults, explicit HTML MIME types, configurable enforced/report-only CSP and opt-in HSTS. Verified with focused Rust tests, generated auth/API/browser flows, and Vite/Turbo asset checks; see [Security Headers and CSP](docs/security-headers.md).
 - [x] Input validation and adversarial security coverage for the dispatched scope:
   generated resource names are limited to 1024 UTF-8 bytes, pagination arithmetic
   saturates safely, and rejection/state-preservation/HTML-escaping cases are tested.
   Unit, HTTP and browser threat-model coverage is recorded in the
-  [coverage matrix](docsify-docs/security-test-coverage.md).
+  [coverage matrix](docs/security-test-coverage.md).
 - [x] Production review of access-log persistence and operations (2026-09-13): see
-  [findings and operator runbook](docsify-docs/access-logging-production-review.md).
+  [findings and operator runbook](docs/access-logging-production-review.md).
   Wrapper bypasses and diagnostic disclosure fixed; focused Compose tests and
   all-feature static analysis passed. The subsequent durable SQLite implementation
   is documented in the same guide; disclosure coverage and deployment-specific
   privacy/retention decisions remain open.
-- [x] Source-grounded [threat model](docsify-docs/threat-model.md) and actionable
-  [release security checklist](docsify-docs/release-security-checklist.md) documented (2026-09-12).
+- [x] Source-grounded [threat model](docs/threat-model.md) and actionable
+  [release security checklist](docs/release-security-checklist.md) documented (2026-09-12).
   Documentation is complete; identified risks, release gates and deployment validation remain open.
 
 Remaining security follow-ups:
@@ -311,10 +311,10 @@ Remaining security follow-ups:
   SQLite/Postgres SQL windows, deterministic paging, API bounds and generated
   browser/user-admin regressions pass. Locked workspace tests/Clippy/docs and
   generated-app checks pass; CI now runs the dedicated Compose harness. See
-  [bounded collections](docsify-docs/bounded-collections.md).
-- [x] Durable read-audit persistence (2026-09-14): opt-in SQLite journal, required startup selection, migration/reopen, metadata minimization and bounded retention hook. Verified with locked workspace tests, HTTP lock/disk PHI rejection, real Chromium process-restart receipts, Clippy and Rust docs. See [operations](docsify-docs/access-logging-production-review.md).
+  [bounded collections](docs/bounded-collections.md).
+- [x] Durable read-audit persistence (2026-09-14): opt-in SQLite journal, required startup selection, migration/reopen, metadata minimization and bounded retention hook. Verified with locked workspace tests, HTTP lock/disk PHI rejection, real Chromium process-restart receipts, Clippy and Rust docs. See [operations](docs/access-logging-production-review.md).
 - [ ] Deployment audit policy: approve disclosure inventory, identifiers, retention/legal holds, storage access/encryption, archival and backup restore/erasure. No default legal duration or expanded disclosure scope is imposed.
-- [x] Implement durable optional-plugin browser-session invalidation after role, active-state and password changes, logout and detected idle expiry. Old cookies cannot regain access after identity restoration; store failures deny access. See [auth plugins](docsify-docs/auth-plugins.md).
+- [x] Implement durable optional-plugin browser-session invalidation after role, active-state and password changes, logout and detected idle expiry. Old cookies cannot regain access after identity restoration; store failures deny access. See [auth plugins](docs/auth-plugins.md).
 - [ ] Resolve room authorization and projection-origin validation gaps identified by the threat model.
 
 ### Phase 3 — Plugin and hook system
@@ -396,8 +396,8 @@ Remaining security follow-ups:
 When sources disagree:
 
 1. Current code in `crates/` and `migrations/`
-2. Accepted ADRs in `docsify-docs/architecture-decisions/`
-3. Current guides in `docsify-docs/`
+2. Accepted ADRs in `docs/architecture-decisions/`
+3. Current guides in `docs/`
 4. This file
 5. Historical plans, implementation notes, and QA reports
 
@@ -405,6 +405,6 @@ When sources disagree:
 
 Added unit, real HTTP and Chromium security coverage, including explicit open-gap
 reproductions and separate desired-security probes. Fixed strict JWT missing-jti and
-missing-store bypasses. See [coverage matrix](docsify-docs/security-test-coverage.md).
+missing-store bypasses. See [coverage matrix](docs/security-test-coverage.md).
 Durable audit storage, cached-session policy, room authorization and projection
 origin validation remain open; passing characterization tests does not close them.

@@ -1353,8 +1353,8 @@ When implementing event sourcing features, ensure:
 
 ## References
 
-- Implementation Guide: `/docsify-docs/resources.md`
-- Architecture Overview: `/docsify-docs/command-bus.md`
+- Implementation Guide: `/docs/resources.md`
+- Architecture Overview: `/docs/command-bus.md`
 - Plugin System Plan: `/plugin-system-plan.md`
 - Rust API Guidelines: https://rust-lang.github.io/api-guidelines/
 

@@ -36,7 +36,7 @@
         function(hook, vm) {
           hook.beforeEach(function(html) {
             // Add last updated timestamp
-            const url = 'https://github.com/lotharthesavior/arc/blob/master/docsify-docs/' + vm.route.file;
+            const url = 'https://github.com/lotharthesavior/arc/blob/master/docs/' + vm.route.file;
             const editHtml = '[:memo: Edit this page on GitHub](' + url + ')\n\n';
             return editHtml + html;
           });

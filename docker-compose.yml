@@ -66,8 +66,8 @@ services:
   # stream that the app publishes to in EVENT_BUS=nats mode, and owns routing,
   # filtering, dedupe, retry, and dead-lettering. It replaces the retired
   # Rust durable-consumer crate. See
-  # docsify-docs/architecture-decisions/0001-benthos-only-event-routing.md
-  # and docsify-docs/event-handlers.md.
+  # docs/architecture-decisions/0001-benthos-only-event-routing.md
+  # and docs/event-handlers.md.
   benthos:
     image: docker.redpanda.com/redpandadata/connect:latest
     command: ["run", "/config/generated/events.yaml"]

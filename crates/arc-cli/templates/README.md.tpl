@@ -36,5 +36,5 @@ edit pages when the session plugin is installed. Browser writes retain CSRF prot
 commands; reads use the resource projection. Generation refuses to overwrite an existing resource.
 `aggregate` is an alias for `resource`.
 
-See the [Arc authentication plugin reference](https://github.com/lotharthesavior/arc/blob/master/docsify-docs/auth-plugins.md)
+See the [Arc authentication plugin reference](https://github.com/lotharthesavior/arc/blob/master/docs/auth-plugins.md)
 for capability ownership, configuration, routes, and authorization boundaries.

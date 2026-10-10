@@ -283,15 +283,15 @@ jobs:
 
       - name: Copy Rust API docs into the canonical Docsify site
         run: |
-          mkdir -p docsify-docs/api
-          cp -r target/doc/* docsify-docs/api/
+          mkdir -p docs/api
+          cp -r target/doc/* docs/api/
 
       - name: Deploy to GitHub Pages
         if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./docsify-docs
+          publish_dir: ./docs
           cname: arc.dev  # Optional: your custom domain
 
   # Notify on release completion

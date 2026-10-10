@@ -1,4 +1,4 @@
-.PHONY: help install build dev serve migrate seed test clean format check lint doctor arc-check publish-check scaffold-check benthos-config benthos-config-check benthos-lint docs-check docker-build docker-up docker-down e2e e2e-install e2e-build e2e-headed e2e-report docsify docsify-docs
+.PHONY: help install build dev serve migrate seed test clean format check lint doctor arc-check publish-check scaffold-check benthos-config benthos-config-check benthos-lint docs-check docker-build docker-up docker-down e2e e2e-install e2e-build e2e-headed e2e-report docsify docs
 
 # Default target
 .DEFAULT_GOAL := help
@@ -238,15 +238,15 @@ frontend-install: ## Install npm dependencies only
 
 ##@ Documentation
 
-# Serve the docsify-docs set locally (http://localhost:3001 by default)
+# Serve the docs/ site locally (http://localhost:3001 by default)
 DOCSIFY_PORT ?= 3001
-docsify docsify-docs: ## Serve docsify-docs locally (DOCSIFY_PORT=3001)
-	@echo "$(GREEN)Serving docsify-docs at http://localhost:$(DOCSIFY_PORT)$(NC)"
+docsify docs: ## Serve docs/ locally with Docsify (DOCSIFY_PORT=3001)
+	@echo "$(GREEN)Serving docs/ at http://localhost:$(DOCSIFY_PORT)$(NC)"
 	@if [ ! -d node_modules/docsify-cli ] && ! command -v docsify >/dev/null 2>&1; then \
 		echo "$(YELLOW)docsify-cli not found; run: npm install$(NC)"; \
 		exit 1; \
 	fi
-	npx docsify serve docsify-docs --port $(DOCSIFY_PORT)
+	npx docsify serve docs --port $(DOCSIFY_PORT)
 
 ##@ Cleanup
 

@@ -39,12 +39,12 @@ if [[ "$(printf '%s\n' "$VERSION" "$PUBLISHED_VERSION" | sort -V | tail -1)" != 
   echo "Published version cannot exceed the workspace version" >&2
   exit 1
 fi
-require "The latest published package version is **$PUBLISHED_VERSION**" docsify-docs/packages.md "package publication status"
-require "Source version **$VERSION**" docsify-docs/packages.md "package source version"
-require "arc-core = \"$PUBLISHED_VERSION\"" docsify-docs/packages.md "published dependency example"
-require "arc-web = \"$PUBLISHED_VERSION\"" docsify-docs/packages.md "published dependency example"
-require "The routing generator, config" docsify-docs/packages.md "implemented routing overview"
-require "routing integration suite publishes through" docsify-docs/event-handlers.md "routing integration coverage"
+require "The latest published package version is **$PUBLISHED_VERSION**" docs/packages.md "package publication status"
+require "Source version **$VERSION**" docs/packages.md "package source version"
+require "arc-core = \"$PUBLISHED_VERSION\"" docs/packages.md "published dependency example"
+require "arc-web = \"$PUBLISHED_VERSION\"" docs/packages.md "published dependency example"
+require "The routing generator, config" docs/packages.md "implemented routing overview"
+require "routing integration suite publishes through" docs/event-handlers.md "routing integration coverage"
 require "[x] NATS → Benthos → Arc-owned projection integration suite." progress.md "completed routing integration roadmap item"
 require "[x] Generated-pipeline freshness and Redpanda Connect lint CI gates." progress.md "completed routing CI roadmap item"
 
@@ -54,8 +54,8 @@ require "async fn benthos_routes_nats_event_to_arc_projection_handler" crates/ar
 require "input:" config/benthos/generated/events.yaml "generated Benthos pipeline"
 require "make benthos-config-check" .github/workflows/ci.yml "Benthos freshness CI gate"
 
-forbid "NATS publishing and Benthos (Redpanda Connect) event routing are still being completed" docsify-docs "obsolete routing work-in-progress claim"
-forbid "The remaining routing integration test should publish" docsify-docs "obsolete routing test claim"
+forbid "NATS publishing and Benthos (Redpanda Connect) event routing are still being completed" docs "obsolete routing work-in-progress claim"
+forbid "The remaining routing integration test should publish" docs "obsolete routing test claim"
 forbid "Benthos (Redpanda Connect) routing remain work in progress" progress.md "obsolete roadmap routing claim"
 
 if [ "$fail" -ne 0 ]; then

@@ -5,8 +5,8 @@
 # the retired arc-worker durable-consumer crate.
 #
 # See:
-#   docsify-docs/architecture-decisions/0001-benthos-only-event-routing.md
-#   docsify-docs/event-handlers.md
+#   docs/architecture-decisions/0001-benthos-only-event-routing.md
+#   docs/event-handlers.md
 #
 # Each JetStream message body is the JSON-serialized arc-core `Event`:
 #   { event_id, aggregate_type, aggregate_id, sequence, event_type,

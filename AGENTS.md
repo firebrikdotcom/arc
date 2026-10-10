@@ -37,7 +37,7 @@ Operational guide for agents working in this repository. Keep changes aligned wi
   - Session/cookie auth for HTML/admin routes.
   - JWT bearer auth for `/api/*`.
 - Realtime: WebSocket support under `crates/arc-app/src/websocket/`.
-- Distributed event lane: `arc-es-nats` publishes persisted events to NATS JetStream; **Benthos (Redpanda Connect)** is the single routing and event-handler delivery layer that consumes `events.>`. See `docsify-docs/architecture-decisions/0001-benthos-only-event-routing.md` and `docsify-docs/event-handlers.md`. (The earlier `arc-worker` consumer crate has been removed; treat any reference to it as historical.)
+- Distributed event lane: `arc-es-nats` publishes persisted events to NATS JetStream; **Benthos (Redpanda Connect)** is the single routing and event-handler delivery layer that consumes `events.>`. See `docs/architecture-decisions/0001-benthos-only-event-routing.md` and `docs/event-handlers.md`. (The earlier `arc-worker` consumer crate has been removed; treat any reference to it as historical.)
 
 Important: older planning docs can lag behind code. If docs conflict, prefer current source and the source-of-truth order below.
 
@@ -59,7 +59,7 @@ Important: older planning docs can lag behind code. If docs conflict, prefer cur
 - `config/benthos/`: Benthos (Redpanda Connect) routing pipeline(s) that consume `events.>`.
 - `config/handlers/`: event-handler manifests (planned) compiled into Benthos pipelines.
 - `migrations/`: Diesel SQL migrations.
-- `docsify-docs/`: canonical user-facing documentation rendered by Docsify. Every user-visible
+- `docs/`: canonical user-facing documentation rendered by Docsify. Every user-visible
   framework, CLI, plugin, configuration, setup, or workflow change must update this docs set.
 - `AGENTS.md`: operational rules for agents; retain and update alongside architectural changes.
 - `progress.md`: canonical roadmap/status record; retain and keep current.
@@ -109,7 +109,7 @@ Important: older planning docs can lag behind code. If docs conflict, prefer cur
 - `arc-es-nats` publishes persisted events to JetStream when `EVENT_BUS=nats` is selected. The writer's responsibility ends at append + publish.
 - **Benthos (Redpanda Connect)** is the single durable consumer of `events.>` in distributed mode: it owns routing, filtering, dedupe, retries, dead-lettering, and handler delivery. There is no Rust consumer of `events.>`.
 - Benthos must never write directly to Arc databases. Projection writes must run through Arc-owned code paths (for example an internal HTTP projection endpoint/service that uses `Projector`/`ProjectionEngine`/`ReadModelStore`).
-- Event handlers are external to Arc. Add one with a handler manifest (`config/handlers/<name>.yaml`) that the generator compiles into a Benthos pipeline — never by editing a Rust crate. See `docsify-docs/event-handlers.md`.
+- Event handlers are external to Arc. Add one with a handler manifest (`config/handlers/<name>.yaml`) that the generator compiles into a Benthos pipeline — never by editing a Rust crate. See `docs/event-handlers.md`.
 - NATS-backed tests spawn a local `nats-server -js`; CI must provision a real `nats-server` binary.
 
 ### Auth Rules
@@ -149,12 +149,12 @@ Important: older planning docs can lag behind code. If docs conflict, prefer cur
 
 ### Immediate
 
-- Land `config/benthos/` routing pipelines and the handler-manifest → Benthos-config generator (`make benthos-config`), plus a `benthos lint` CI gate. See `docsify-docs/architecture-decisions/0001-benthos-only-event-routing.md`.
+- Land `config/benthos/` routing pipelines and the handler-manifest → Benthos-config generator (`make benthos-config`), plus a `benthos lint` CI gate. See `docs/architecture-decisions/0001-benthos-only-event-routing.md`.
 - Reconcile high-level docs that still describe the old MVC-only layout.
 
 ### Near-Term
 
-- Keep `docsify-docs/` aligned with the current generated application and published packages.
+- Keep `docs/` aligned with the current generated application and published packages.
 - Improve audit checks for stale paths and CI assumptions.
 - Tighten controller/service/domain boundaries as more aggregates are added.
 
@@ -177,7 +177,7 @@ Important: older planning docs can lag behind code. If docs conflict, prefer cur
 - For template work, verify Tera rendering and asset manifest assumptions.
 - For schema work, update migrations, seeders, and tests in one pass.
 - Keep all maintained project documentation, including ADRs and engineering guides, under
-  `docsify-docs/`. Do not recreate a parallel `docs/` tree.
+  `docs/`. Do not create a second documentation tree.
 - For roadmap/documentation work, update the source-of-truth docs instead of adding another planning document.
 - Do not commit unless the user explicitly asks or approves.
 
@@ -186,7 +186,7 @@ Important: older planning docs can lag behind code. If docs conflict, prefer cur
 When sources disagree, use this order:
 
 1. Current source code in `crates/` and `migrations/`
-2. Accepted ADRs under `docsify-docs/architecture-decisions/`
-3. Current documentation in `docsify-docs/`
+2. Accepted ADRs under `docs/architecture-decisions/`
+3. Current documentation in `docs/`
 4. `progress.md`
 5. Root `AGENTS.md`

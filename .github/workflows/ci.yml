@@ -250,9 +250,9 @@ jobs:
 
       - name: Check documentation structure
         run: |
-          test -f docsify-docs/index.html || { echo "Missing docsify-docs/index.html"; exit 1; }
-          test -f docsify-docs/_sidebar.md || { echo "Missing docsify-docs/_sidebar.md"; exit 1; }
-          test -f docsify-docs/auth-plugins.md || { echo "Missing docsify-docs/auth-plugins.md"; exit 1; }
+          test -f docs/index.html || { echo "Missing docs/index.html"; exit 1; }
+          test -f docs/_sidebar.md || { echo "Missing docs/_sidebar.md"; exit 1; }
+          test -f docs/auth-plugins.md || { echo "Missing docs/auth-plugins.md"; exit 1; }
           echo "✓ Documentation structure is valid"
 
       - name: Check documentation freshness

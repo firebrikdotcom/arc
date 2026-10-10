@@ -99,23 +99,23 @@ check_generated_banner \
 echo "arc-check: checking canonical Docsify documentation..."
 
 for file in \
-  docsify-docs/index.html \
-  docsify-docs/_sidebar.md \
-  docsify-docs/auth-plugins.md; do
+  docs/index.html \
+  docs/_sidebar.md \
+  docs/auth-plugins.md; do
   if [ ! -f "$file" ]; then
     echo "MISSING CANONICAL DOC: $file" >&2
     fail=1
   fi
 done
 
-if ! rg -q '\]\(auth-plugins\.md\)' docsify-docs/_sidebar.md; then
+if ! rg -q '\]\(auth-plugins\.md\)' docs/_sidebar.md; then
   echo "DOC NAVIGATION VIOLATION: Docsify sidebar must link auth-plugins.md" >&2
   fail=1
 fi
 
 for package in arc-auth-core arc-auth-db arc-auth-session arc-auth-admin arc-auth-jwt arc-auth-rbac; do
-  if ! rg -q "${package}" docsify-docs/auth-plugins.md; then
-    echo "AUTH DOC VIOLATION: docsify-docs/auth-plugins.md must document ${package}" >&2
+  if ! rg -q "${package}" docs/auth-plugins.md; then
+    echo "AUTH DOC VIOLATION: docs/auth-plugins.md must document ${package}" >&2
     fail=1
   fi
 done

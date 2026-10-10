@@ -1,4 +1,4 @@
-<!-- docsify-docs/_coverpage.md -->
+<!-- docs/_coverpage.md -->
 
 <!-- HTML img (not markdown) so we can cap size on the cover -->
 <img src="imgs/arc-logo.png" alt="Arc logo" width="120" height="120" style="width:120px;height:auto;max-width:40vw;">
