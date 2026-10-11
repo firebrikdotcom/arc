@@ -30,6 +30,13 @@ This gate is required because `cargo publish --dry-run` can accidentally see
 workspace-root files that will not exist when a downstream project downloads
 the crate.
 
+Arc is dual licensed under MIT or Apache-2.0, set once in the workspace
+`license` field. Cargo packages only files inside a crate's directory, so each
+published crate carries `LICENSE-MIT` and `LICENSE-APACHE` symlinks to the
+root files; Cargo copies their contents into the archive. Give a new publishable
+crate the same two symlinks, and confirm them with
+`cargo package --list -p <crate>`.
+
 For a new lockstep version, crates.io requires each dependency to exist before
 it will package the next crate. Run the same gate and publish sequentially:
 

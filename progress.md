@@ -1,6 +1,6 @@
 # Arc Project Progress
 
-**Last updated:** 2026-09-14
+**Last updated:** 2026-10-11
 **Current development version:** 0.8.8
 **Latest published version:** 0.8.6
 **Status:** v0.8.8 integrates three further security workstreams — bounded collection
@@ -14,6 +14,13 @@ observability, and developer experience.
 
 This is the canonical project-status and roadmap tracker. Current source code and accepted ADRs
 take precedence when a claim here becomes stale.
+
+## Licensing — 2026-10-11
+
+- Arc is dual licensed under MIT or Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`);
+  the workspace `license` field reads `MIT OR Apache-2.0` and every crate inherits it.
+- Each published crate links both license files so they ship in its package. The
+  new license reaches crates.io with the next release; v0.8.6 remains MIT only.
 
 ## Input security lane — verified 2026-09-13
 

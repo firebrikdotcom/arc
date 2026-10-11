@@ -120,3 +120,7 @@ Benthos is the only durable distributed event router. It consumes `events.>` and
 - [Event handlers](docs/event-handlers.md)
 - [Upgrading](docs/upgrading.md)
 - [Publishing crates](docs/publishing-crates.md)
+
+## License
+
+Arc is licensed under either of the MIT license ([LICENSE-MIT](LICENSE-MIT)) or the Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE)), at your option. Unless you state otherwise, any contribution you submit for inclusion is dual licensed as above, without any additional terms or conditions.

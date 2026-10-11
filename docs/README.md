@@ -40,3 +40,7 @@ See [Authentication Plugins](auth-plugins.md).
 - [Add a server-rendered page](ui.md)
 - [Test the application](testing.md)
 - [Fix common startup problems](troubleshooting.md)
+
+## License
+
+Arc is licensed under either of the MIT license ([LICENSE-MIT](https://github.com/firebrikdotcom/arc/blob/master/LICENSE-MIT)) or the Apache License, Version 2.0 ([LICENSE-APACHE](https://github.com/firebrikdotcom/arc/blob/master/LICENSE-APACHE)), at your option. Unless you state otherwise, any contribution you submit for inclusion is dual licensed as above, without any additional terms or conditions.
