@@ -1,4 +1,4 @@
-# Integrity Chain (HIPAA-5)
+# Integrity Chain (Step 5)
 
 Each event in the store can carry an HMAC-SHA256 signature over its content
 plus the previous event's signature. Tampering with any historical row
@@ -53,7 +53,7 @@ threat model is *internal* tampering by someone with DB write access, not
 secret only the application owns is enough evidence of tampering — and
 ~50× faster on the write path.
 
-Step 5 may add a public-verifiable mode for cross-organization audit
+A later release may add a public-verifiable mode for cross-organization audit
 hand-off; the trait surface accommodates it without breaking changes.
 
 ## Runtime enforcement

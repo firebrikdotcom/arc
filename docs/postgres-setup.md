@@ -78,5 +78,5 @@ has the expected schema.
 
 - **Optimistic Concurrency**: Postgres implementation uses `UNIQUE(aggregate_id, sequence)` and a version-check query within a transaction to ensure consistency.
 - **Idempotent Upserts**: Read-model upserts use `ON CONFLICT (id) DO UPDATE ... WHERE version < EXCLUDED.version` to ensure that replay and out-of-order delivery converge to the correct state.
-- **Audit Metadata**: HIPAA-compliant audit fields are persisted inline on each event row.
+- **Audit Metadata**: Audit fields (who, when, from where, why) are persisted inline on each event row.
 - **Integrity Metadata**: When `EVENT_INTEGRITY_KEY` is configured, signatures and key ids are persisted inline on each event row and verified on load/stream.

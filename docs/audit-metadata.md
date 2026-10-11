@@ -1,6 +1,6 @@
-# Audit Metadata (HIPAA-1)
+# Audit Metadata (Step 1)
 
-> **Status:** implemented in HIPAA-1 (Step 1 addendum). Required reading before
+> **Status:** implemented in Step 1. Required reading before
 > writing a controller, an aggregate, or any code that touches `EventStore`.
 
 Every event persisted by the framework carries a typed `AuditMetadata` value.
@@ -58,7 +58,7 @@ refuses unaudited writes.
 ```rust
 pub struct AuditMetadata {
     pub actor_id:         String,         // required, non-empty
-    pub actor_session_id: Option<String>, // pair w/ HIPAA-4 session store
+    pub actor_session_id: Option<String>, // pair w/ Step 4 session store
     pub source_ip:        Option<String>,
     pub user_agent:       Option<String>,
     pub timestamp_utc_us: i64,            // microseconds, > 0
@@ -73,7 +73,7 @@ pub struct AuditMetadata {
 |-----------------------|------|
 | `"system"`            | seeders, cron, migrations, internal jobs |
 | `"anonymous"`         | unauthenticated requests (e.g. self-registration) |
-| `"legacy-pre-hipaa"`  | rows backfilled by the HIPAA-1 migration |
+| `"legacy-pre-hipaa"`  | rows backfilled by the Step 1 migration |
 
 Use `AuditMetadata::system()` for internal jobs; it synthesizes a fresh
 `correlation_id` and never fails validation.
@@ -251,16 +251,18 @@ SELECT * FROM events WHERE causation_id = 'event-uuid-123';
   *when something happened* in human-readable terms, not a serializable
   total order.
 - **`InProcessEventBus` subscribers receive full audit including IP/UA.**
-  Handlers that log events must avoid leaking these fields to non-compliant
-  sinks. A `redacted_for_logging()` helper is on the roadmap.
+  Handlers that log events must avoid leaking these fields to places not
+  approved for this data. A `redacted_for_logging()` helper is on the roadmap.
 - **The `legacy-pre-hipaa` sentinel is queryable forever.** Events written
-  before HIPAA-1 have actor `legacy-pre-hipaa` and a derived microsecond
+  before Step 1 have actor `legacy-pre-hipaa` and a derived microsecond
   timestamp. They satisfy validation but are clearly distinguishable from
-  authentic post-HIPAA audit data.
+  audit data written after Step 1.
 
 ## See also
 
-  (HIPAA-2 through HIPAA-5)
+- Steps 2 through 5: [Access Logging](access-logging.md),
+  [Idle Timeout](idle-timeout.md), [Session Revocation](session-revocation.md),
+  [Integrity Chain](integrity-chain.md)
 - `crates/arc-core/src/audit.rs` — the source of truth for the type
   and validation rules
 - `migrations/2026-04-21-000002_add_hipaa_audit/up.sql`

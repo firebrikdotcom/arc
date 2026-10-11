@@ -1,9 +1,10 @@
-# Server-Side JWT Sessions (HIPAA-4)
+# Server-Side JWT Sessions (Step 4)
 
 `SessionStore` makes JWTs revocable. Without it, a stolen token stays valid
 until natural expiry (typically 24h) and the framework cannot prove a user
-is "logged out". HIPAA §164.312(d) requires immediate session revocation
-on breach response — this trait is the hook.
+is "logged out". Revocable sessions support HIPAA §164.312(d) Person or
+Entity Authentication and let an operator end a session immediately during
+breach response — this trait is the hook.
 
 Optional browser auth plugins use a separate durable handle table owned by
 `arc-auth-db`; see [browser session invalidation](auth-plugins.md#browser-session-invalidation).
@@ -50,7 +51,7 @@ This is the **opposite** of `AccessLogger`'s `FailOpenWarn` default:
 | Concern | When the sink fails |
 |---|---|
 | `AccessLogger::log_access` for `Sensitivity::Pii` and below | warn + continue |
-| `AccessLogger::log_access` for `Sensitivity::Phi`/`Pci` | fail hard (HIPAA-2a) |
+| `AccessLogger::log_access` for `Sensitivity::Phi`/`Pci` | fail hard (Step 2) |
 | `SessionStore::is_valid` | **always** fail closed (503) |
 | `SessionStore::record_session` at login | **always** fail closed (503) |
 | `SessionStore::revoke` at logout | warn-and-continue (idempotent goal) |
@@ -76,7 +77,7 @@ CREATE INDEX idx_jwt_sessions_expires_at ON jwt_sessions(expires_at_us);
 
 ## Grandfather mode
 
-Tokens minted before HIPAA-4 landed have no `jti`. The middleware refuses
+Tokens minted before Step 4 landed have no `jti`. The middleware refuses
 them by default. Set `JWT_GRANDFATHER_LEGACY=true` to accept them during a
 rollout window — every accept logs a `tracing::warn!`. Remove the env flag
 once existing tokens have churned out.
