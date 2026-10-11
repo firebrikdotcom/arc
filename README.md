@@ -1,7 +1,6 @@
-<h1 align="center">
-  Arc
-  <img src="docs/imgs/arc-logo.png" alt="Arc logo" width="44" height="44">
-</h1>
+<p align="center">
+  <img src="docs/imgs/arc-banner.jpg" alt="Arc: immutable architecture. Event sourced, CQRS core, Rust engine." width="100%">
+</p>
 
 Arc is a beta Rust framework for event-sourced web applications.
 
