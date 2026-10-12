@@ -11,9 +11,15 @@ else
     crates=(arc-core arc-es-sqlite arc-es-postgres arc-es-nats arc-web arc-auth-core arc-auth-db arc-auth-session arc-auth-admin arc-auth-jwt arc-auth-rbac arc-web-cli)
 fi
 
+# Package the release together so Cargo can resolve unpublished workspace versions.
+package_args=()
 for crate in "${crates[@]}"; do
-    echo "Packaging ${crate} ${version}..."
-    cargo package --allow-dirty --no-verify -p "$crate"
+    package_args+=(-p "$crate")
+done
+cargo package --allow-dirty --no-verify "${package_args[@]}"
+
+package_overrides=()
+for crate in "${crates[@]}"; do
 
     package_dir="$repo_root/target/package/${crate}-${version}"
     package_archive="$repo_root/target/package/${crate}-${version}.crate"
@@ -35,6 +41,8 @@ for crate in "${crates[@]}"; do
         echo "Packaged source directory missing: $package_dir" >&2
         exit 1
     fi
+    # Verify only extracted archives, never the original workspace sources.
+    package_overrides+=(--config "patch.crates-io.${crate}.path=\"${package_dir}\"")
 done
 
 export CARGO_TARGET_DIR="$repo_root/target/publish-check"
@@ -42,7 +50,7 @@ export CARGO_TARGET_DIR="$repo_root/target/publish-check"
 for crate in "${crates[@]}"; do
     package_dir="$repo_root/target/package/${crate}-${version}"
     echo "Compiling packaged ${crate} tests..."
-    cargo test --manifest-path "$package_dir/Cargo.toml" --all-features --no-run
+    cargo test --manifest-path "$package_dir/Cargo.toml" "${package_overrides[@]}" --all-features --no-run
 done
 
 if [[ ! " ${crates[*]} " =~ " arc-web " ]]; then
@@ -73,6 +81,6 @@ fn main() {
 EOF
 
 echo "Compiling arc-web from a standalone external consumer..."
-cargo check --manifest-path "$consumer_dir/Cargo.toml"
+cargo check --manifest-path "$consumer_dir/Cargo.toml" "${package_overrides[@]}"
 
 echo "Publish-package verification passed."

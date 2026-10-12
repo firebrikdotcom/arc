@@ -1,11 +1,11 @@
 # Published Packages
 
-The latest published package version is **0.8.6**. Source version **0.8.8** contains
-the merged security workstreams. Tagging a release publishes the GitHub release,
-its prebuilt binaries and the documentation site, but crates.io publication is
-gated on the `PUBLISH_CRATES` repository variable and is currently disabled, so
-the published package version stays at 0.8.6. The installation examples below
-continue to target published packages.
+The latest published package version is **0.8.9**. Source version **0.8.9** includes
+the merged security workstreams and publishes all twelve Arc crates under
+`MIT OR Apache-2.0`, with the repository set to
+<https://github.com/firebrikdotcom/arc>. Crates.io publication for this release is
+performed manually in dependency order. Tagging also triggers the GitHub release,
+prebuilt binaries and documentation site workflows.
 
 Generated applications use published crates; they do not depend on an Arc repository checkout.
 
@@ -35,8 +35,8 @@ The CLI writes normal Cargo dependencies:
 
 ```toml
 [dependencies]
-arc-core = "0.8.6"
-arc-web = "0.8.6"
+arc-core = "0.8.9"
+arc-web = "0.8.9"
 ```
 
 You may create the same application manually, but then you must also supply the environment bootstrap, migrations, aggregate, routes, and runtime entry point that the CLI normally generates.
@@ -50,6 +50,12 @@ make setup
 make check
 make test
 ```
+
+Before publishing a workspace release, run `make publish-check`. It packages the
+selected crates together, then compiles their tests and an external consumer using
+only extracted archives for local Arc dependencies. This supports versions that
+are not yet on crates.io. Publication still requires a dry run and upload for each
+crate in dependency order.
 
 Authentication packages and their installation bundles are documented in
 [Authentication Plugins](auth-plugins.md).

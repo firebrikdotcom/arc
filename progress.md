@@ -1,13 +1,15 @@
 # Arc Project Progress
 
 **Last updated:** 2026-10-11
-**Current development version:** 0.8.8
-**Latest published version:** 0.8.6
-**Status:** v0.8.8 integrates three further security workstreams — bounded collection
+**Current development version:** 0.8.9
+**Latest published version:** 0.8.9
+**Status:** v0.8.9 updates all twelve published crates to `MIT OR Apache-2.0` and
+the `https://github.com/firebrikdotcom/arc` repository. It retains the v0.8.8 security
+work, which integrates three further security workstreams — bounded collection
 reads, a durable SQLite read-audit journal, and durable browser-session invalidation —
 on top of the v0.8.7 security work, validated locally with workspace tests, live
 storage/routing integration, browser E2E and static checks.
-Package publication remains at v0.8.6, which is released successfully. The reusable framework, standalone application
+The reusable framework, standalone application
 generator, authentication plugins, Benthos routing/generation, and generated-app UI are
 implemented and validated. Remaining roadmap work focuses on security hardening, extensibility,
 observability, and developer experience.
@@ -20,7 +22,7 @@ take precedence when a claim here becomes stale.
 - Arc is dual licensed under MIT or Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`);
   the workspace `license` field reads `MIT OR Apache-2.0` and every crate inherits it.
 - Each published crate links both license files so they ship in its package. The
-  new license reaches crates.io with the next release; v0.8.6 remains MIT only.
+  new license reaches crates.io with v0.8.9.
 
 ## Input security lane — verified 2026-09-13
 

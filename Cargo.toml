@@ -17,11 +17,11 @@ members = [
 ]
 
 [workspace.package]
-version = "0.8.8"
+version = "0.8.9"
 edition = "2021"
 authors = ["Savio Resende <savio@savioresende.com>"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/lotharthesavior/arc"
+repository = "https://github.com/firebrikdotcom/arc"
 
 [workspace.dependencies]
 # Core event sourcing dependencies
