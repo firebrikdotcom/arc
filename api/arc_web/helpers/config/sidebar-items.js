@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEFAULT_DATABASE_URL","DEFAULT_POOL_LIMIT","DEFAULT_SESSION_DATABASE_URL","DEFAULT_USER_SNAPSHOT_INTERVAL_EVENTS"],"enum":["DatabaseDriver"],"fn":["database_pool_limit","database_url","event_integrity_key","event_integrity_key_id","session_store_url","user_snapshot_interval_events"]};

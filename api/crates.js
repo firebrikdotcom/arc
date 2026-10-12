@@ -1,0 +1,2 @@
+window.ALL_CRATES = ["arc","arc_auth_admin","arc_auth_core","arc_auth_db","arc_auth_jwt","arc_auth_rbac","arc_auth_session","arc_core","arc_es_nats","arc_es_postgres","arc_es_sqlite","arc_web"];
+//{"start":21,"fragment_lengths":[5,17,16,14,15,16,19,11,14,18,16,10]}

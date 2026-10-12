@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["IntegrityError","IntegrityResult"],"struct":["EventSignature","HmacSha256Chain"],"trait":["IntegrityChain"]};

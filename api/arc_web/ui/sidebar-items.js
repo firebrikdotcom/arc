@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ActionMethod","Audience","FieldKind","FieldValue","FormMethod","UiError"],"struct":["AdminAction","AdminNavItem","Breadcrumb","FieldSpec","FormSpec","OptionSpec","TemplateBundle","TemplateDef","TemplateName","UiContribution","UiHost","UiPage","UiRegistry"]};

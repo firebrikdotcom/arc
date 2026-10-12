@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["generate_csrf_token","get_csrf_token","validate_and_regenerate_csrf_token","validate_csrf_token"]};

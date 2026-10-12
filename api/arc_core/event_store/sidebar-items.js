@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["EventStoreError","VersionCheck"],"fn":["validate_audit_batch"],"struct":["InMemoryEventStore"],"trait":["EventStore"],"type":["EventStoreResult"]};

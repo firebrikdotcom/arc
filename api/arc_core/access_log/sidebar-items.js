@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["AccessLogError","FailurePolicy","PurposeOfUse","Sensitivity"],"struct":["AccessLogEntry","AccessedResource","Identity","NoOpAccessLogger","RecordingAccessLogger"],"trait":["AccessLogger"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"derive":["Deserialize","Serialize"],"mod":["read_model_store"],"struct":["PostgresEventStore"],"trait":["Deserialize","Serialize"]};

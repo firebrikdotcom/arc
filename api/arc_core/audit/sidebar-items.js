@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ANONYMOUS_ACTOR","LEGACY_ACTOR","SYSTEM_ACTOR"],"enum":["AuditError"],"struct":["AuditMetadata"]};

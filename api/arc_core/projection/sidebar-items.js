@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ProjectionError"],"struct":["ProjectionEngine","ProjectionEngineHandler","ProjectionUnit"],"trait":["Projection","Projector"],"type":["ProjectionResult"]};

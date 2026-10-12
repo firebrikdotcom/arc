@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["turbo_stream_after","turbo_stream_append","turbo_stream_before","turbo_stream_prepend","turbo_stream_remove","turbo_stream_replace","turbo_stream_update"]};

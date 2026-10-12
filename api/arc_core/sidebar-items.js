@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"derive":["Deserialize","Serialize"],"mod":["access_log","aggregate","audit","command_bus","event","event_bus","event_store","integrity","projection","read_model_store","session","snapshot"],"struct":["Uuid"],"trait":["Deserialize","Serialize"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["browser_session_ttl_seconds","clear_session_user","get_session_message","get_session_user","is_authenticated","set_session_user"],"struct":["SessionUser"]};

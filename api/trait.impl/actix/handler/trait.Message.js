@@ -1,0 +1,9 @@
+(function() {
+    const implementors = Object.fromEntries([["arc_web",[["impl Message for <a class=\"struct\" href=\"arc_web/websocket/server/struct.BroadcastAll.html\" title=\"struct arc_web::websocket::server::BroadcastAll\">BroadcastAll</a>",0],["impl Message for <a class=\"struct\" href=\"arc_web/websocket/server/struct.BroadcastToRoom.html\" title=\"struct arc_web::websocket::server::BroadcastToRoom\">BroadcastToRoom</a>",0],["impl Message for <a class=\"struct\" href=\"arc_web/websocket/server/struct.BroadcastToUser.html\" title=\"struct arc_web::websocket::server::BroadcastToUser\">BroadcastToUser</a>",0],["impl Message for <a class=\"struct\" href=\"arc_web/websocket/server/struct.Connect.html\" title=\"struct arc_web::websocket::server::Connect\">Connect</a>",0],["impl Message for <a class=\"struct\" href=\"arc_web/websocket/server/struct.Disconnect.html\" title=\"struct arc_web::websocket::server::Disconnect\">Disconnect</a>",0],["impl Message for <a class=\"struct\" href=\"arc_web/websocket/server/struct.Subscribe.html\" title=\"struct arc_web::websocket::server::Subscribe\">Subscribe</a>",0],["impl Message for <a class=\"struct\" href=\"arc_web/websocket/server/struct.Unsubscribe.html\" title=\"struct arc_web::websocket::server::Unsubscribe\">Unsubscribe</a>",0],["impl Message for <a class=\"struct\" href=\"arc_web/websocket/server/struct.WsMessage.html\" title=\"struct arc_web::websocket::server::WsMessage\">WsMessage</a>",0]]]]);
+    if (window.register_implementors) {
+        window.register_implementors(implementors);
+    } else {
+        window.pending_implementors = implementors;
+    }
+})()
+//{"start":59,"fragment_lengths":[1405]}

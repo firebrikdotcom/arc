@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["create_global_rate_limiter","create_rate_limiter"],"struct":["LoginRateLimiter","RateLimiter"]};

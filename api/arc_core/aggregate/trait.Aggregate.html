@@ -1,0 +1,203 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Trait for domain aggregates in event sourcing."><title>Aggregate in arc_core::aggregate - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-0c87338a.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="arc_core" data-themes="" data-resource-suffix="" data-rustdoc-version="1.99.0 (b940084d7 2026-09-28)" data-channel="1.99.0" data-search-js="search-cf4fc35e.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../static.files/main-417ebf0a.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc trait"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Aggregate</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../arc_core/index.html">arc_<wbr>core</a><span class="version">0.8.9</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Aggregate</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#lifecycle" title="Lifecycle">Lifecycle</a></li><li><a href="#design-principles" title="Design Principles">Design Principles</a></li><li><a href="#type-parameters" title="Type Parameters">Type Parameters</a></li><li><a href="#example" title="Example">Example</a></li></ul><h3><a href="#required-associated-types">Required Associated Types</a></h3><ul class="block"><li><a href="#associatedtype.Command" title="Command">Command</a></li><li><a href="#associatedtype.Error" title="Error">Error</a></li><li><a href="#associatedtype.Event" title="Event">Event</a></li></ul><h3><a href="#required-methods">Required Methods</a></h3><ul class="block"><li><a href="#tymethod.aggregate_type" title="aggregate_type">aggregate_type</a></li><li><a href="#tymethod.apply" title="apply">apply</a></li><li><a href="#tymethod.handle" title="handle">handle</a></li><li><a href="#tymethod.version" title="version">version</a></li></ul><h3><a href="#provided-methods">Provided Methods</a></h3><ul class="block"><li><a href="#method.from_events" title="from_events">from_events</a></li><li><a href="#method.from_snapshot" title="from_snapshot">from_snapshot</a></li><li><a href="#method.to_snapshot" title="to_snapshot">to_snapshot</a></li></ul><h3><a href="#dyn-compatibility">Dyn Compatibility</a></h3><h3><a href="#implementors">Implementors</a></h3></section><div id="rustdoc-modnav"><h2><a href="index.html">In arc_<wbr>core::<wbr>aggregate</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">arc_core</a>::<wbr><a href="index.html">aggregate</a></div><h1>Trait <span class="trait">Aggregate</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/arc_core/aggregate.rs.html#696-1003">Source</a> </span></div><pre class="rust item-decl"><code>pub trait Aggregate:
+    <a class="trait" href="https://doc.rust-lang.org/1.99.0/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a>
+    + <a class="trait" href="https://doc.rust-lang.org/1.99.0/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a>
+    + <a class="trait" href="https://doc.rust-lang.org/1.99.0/core/default/trait.Default.html" title="trait core::default::Default">Default</a> {
+    type <a href="#associatedtype.Command" class="associatedtype">Command</a>: <a class="trait" href="trait.Command.html" title="trait arc_core::aggregate::Command">Command</a>;
+    type <a href="#associatedtype.Event" class="associatedtype">Event</a>;
+    type <a href="#associatedtype.Error" class="associatedtype">Error</a>: <a class="trait" href="https://doc.rust-lang.org/1.99.0/core/error/trait.Error.html" title="trait core::error::Error">Error</a> + <a class="trait" href="https://doc.rust-lang.org/1.99.0/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + <a class="trait" href="https://doc.rust-lang.org/1.99.0/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + 'static;
+
+    // Required methods
+    fn <a href="#tymethod.aggregate_type" class="fn">aggregate_type</a>() -&gt; &amp;'static <a class="primitive" href="https://doc.rust-lang.org/1.99.0/std/primitive.str.html">str</a>;
+<span class="item-spacer"></span>    fn <a href="#tymethod.version" class="fn">version</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/1.99.0/std/primitive.i64.html">i64</a>;
+<span class="item-spacer"></span>    fn <a href="#tymethod.handle" class="fn">handle</a>&lt;'life0, 'async_trait&gt;(
+        &amp;'life0 self,
+        command: Self::<a class="associatedtype" href="trait.Aggregate.html#associatedtype.Command" title="type arc_core::aggregate::Aggregate::Command">Command</a>,
+    ) -&gt; <a class="struct" href="https://doc.rust-lang.org/1.99.0/core/pin/struct.Pin.html" title="struct core::pin::Pin">Pin</a>&lt;<a class="struct" href="https://doc.rust-lang.org/1.99.0/alloc/boxed/struct.Box.html" title="struct alloc::boxed::Box">Box</a>&lt;dyn <a class="trait" href="https://doc.rust-lang.org/1.99.0/core/future/future/trait.Future.html" title="trait core::future::future::Future">Future</a>&lt;Output = <a class="enum" href="https://doc.rust-lang.org/1.99.0/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="struct" href="https://doc.rust-lang.org/1.99.0/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="struct" href="../event/struct.Event.html" title="struct arc_core::event::Event">Event</a>&gt;, Self::<a class="associatedtype" href="trait.Aggregate.html#associatedtype.Error" title="type arc_core::aggregate::Aggregate::Error">Error</a>&gt;&gt; + <a class="trait" href="https://doc.rust-lang.org/1.99.0/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + 'async_trait&gt;&gt;
+       <span class="where">where Self: 'async_trait,
+             'life0: 'async_trait</span>;
+<span class="item-spacer"></span>    fn <a href="#tymethod.apply" class="fn">apply</a>(&amp;mut self, event: &amp;<a class="struct" href="../event/struct.Event.html" title="struct arc_core::event::Event">Event</a>);
+
+    // Provided methods
+    fn <a href="#method.from_events" class="fn">from_events</a>(events: <a class="struct" href="https://doc.rust-lang.org/1.99.0/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="struct" href="../event/struct.Event.html" title="struct arc_core::event::Event">Event</a>&gt;) -&gt; Self { ... }
+<span class="item-spacer"></span>    fn <a href="#method.to_snapshot" class="fn">to_snapshot</a>(&amp;self) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.99.0/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="enum" href="https://docs.rs/serde_json/1.0.151/serde_json/value/enum.Value.html" title="enum serde_json::value::Value">Value</a>&gt; { ... }
+<span class="item-spacer"></span>    fn <a href="#method.from_snapshot" class="fn">from_snapshot</a>(state: <a class="enum" href="https://docs.rs/serde_json/1.0.151/serde_json/value/enum.Value.html" title="enum serde_json::value::Value">Value</a>) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.99.0/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;Self&gt;
+       <span class="where">where Self: <a class="trait" href="https://doc.rust-lang.org/1.99.0/core/marker/trait.Sized.html" title="trait core::marker::Sized">Sized</a></span> { ... }
+}</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Trait for domain aggregates in event sourcing.</p>
+<p>Aggregates are consistency boundaries that encapsulate business logic,
+enforce invariants, and produce events in response to commands.</p>
+<h2 id="lifecycle"><a class="doc-anchor" href="#lifecycle">§</a>Lifecycle</h2>
+<ol>
+<li><strong>Load</strong>: Reconstruct aggregate from event stream using <code>from_events()</code></li>
+<li><strong>Command</strong>: Handle command with <code>handle()</code> to produce new events</li>
+<li><strong>Store</strong>: Persist events to event store (done by command bus)</li>
+<li><strong>Apply</strong>: Apply new events to update aggregate state using <code>apply()</code></li>
+<li><strong>Publish</strong>: Publish events to event bus (done by command bus)</li>
+</ol>
+<h2 id="design-principles"><a class="doc-anchor" href="#design-principles">§</a>Design Principles</h2>
+<ul>
+<li><strong>State is private</strong>: Aggregate state should not be exposed outside</li>
+<li><strong>Commands produce events</strong>: <code>handle()</code> validates and produces events</li>
+<li><strong>Events update state</strong>: <code>apply()</code> updates internal state deterministically</li>
+<li><strong>Pure functions</strong>: <code>handle()</code> has no side effects (no I/O, no mutations)</li>
+<li><strong>Deterministic apply</strong>: Same events always produce same state</li>
+<li><strong>Default implementation</strong>: Aggregate must implement <code>Default</code> for initial state</li>
+</ul>
+<h2 id="type-parameters"><a class="doc-anchor" href="#type-parameters">§</a>Type Parameters</h2>
+<ul>
+<li><code>Command</code>: The command type this aggregate handles (must implement <code>Command</code>)</li>
+<li><code>Event</code>: The domain event type (typically an enum, must be serializable)</li>
+<li><code>Error</code>: The error type for validation failures (must implement <code>std::error::Error</code>)</li>
+</ul>
+<h2 id="example"><a class="doc-anchor" href="#example">§</a>Example</h2>
+<p>See the module-level documentation for a complete example.</p>
+</div></details><h2 id="required-associated-types" class="section-header">Required Associated Types<a href="#required-associated-types" class="anchor">§</a></h2><div class="methods"><details class="toggle" open><summary><section id="associatedtype.Command" class="method"><a class="src rightside" href="../../src/arc_core/aggregate.rs.html#698">Source</a><h4 class="code-header">type <a href="#associatedtype.Command" class="associatedtype">Command</a>: <a class="trait" href="trait.Command.html" title="trait arc_core::aggregate::Command">Command</a></h4></section></summary><div class="docblock"><p>The command type this aggregate handles</p>
+</div></details><details class="toggle" open><summary><section id="associatedtype.Event" class="method"><a class="src rightside" href="../../src/arc_core/aggregate.rs.html#701">Source</a><h4 class="code-header">type <a href="#associatedtype.Event" class="associatedtype">Event</a></h4></section></summary><div class="docblock"><p>The domain event type (your custom enum)</p>
+</div></details><details class="toggle" open><summary><section id="associatedtype.Error" class="method"><a class="src rightside" href="../../src/arc_core/aggregate.rs.html#704">Source</a><h4 class="code-header">type <a href="#associatedtype.Error" class="associatedtype">Error</a>: <a class="trait" href="https://doc.rust-lang.org/1.99.0/core/error/trait.Error.html" title="trait core::error::Error">Error</a> + <a class="trait" href="https://doc.rust-lang.org/1.99.0/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + <a class="trait" href="https://doc.rust-lang.org/1.99.0/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + 'static</h4></section></summary><div class="docblock"><p>The error type for validation failures</p>
+</div></details></div><h2 id="required-methods" class="section-header">Required Methods<a href="#required-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="tymethod.aggregate_type" class="method"><a class="src rightside" href="../../src/arc_core/aggregate.rs.html#748">Source</a><h4 class="code-header">fn <a href="#tymethod.aggregate_type" class="fn">aggregate_type</a>() -&gt; &amp;'static <a class="primitive" href="https://doc.rust-lang.org/1.99.0/std/primitive.str.html">str</a></h4></section></summary><div class="docblock"><p>Get the aggregate type name (e.g., “User”, “Order”, “Account”).</p>
+<p>This is used for event metadata and debugging. Should be a static string
+that uniquely identifies this aggregate type in your domain.</p>
+<h5 id="example-1"><a class="doc-anchor" href="#example-1">§</a>Example</h5>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">fn </span>aggregate_type() -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str {
+    <span class="string">"User"
+</span>}
+<span class="macro">assert_eq!</span>(UserAggregate::aggregate_type(), <span class="string">"User"</span>);</code></pre></div></div></details><details class="toggle method-toggle" open><summary><section id="tymethod.version" class="method"><a class="src rightside" href="../../src/arc_core/aggregate.rs.html#796">Source</a><h4 class="code-header">fn <a href="#tymethod.version" class="fn">version</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/1.99.0/std/primitive.i64.html">i64</a></h4></section></summary><div class="docblock"><p>Get the current version (sequence number) of this aggregate.</p>
+<p>The version represents how many events have been applied to this aggregate.
+It starts at 0 for a new aggregate and increments with each event.</p>
+<p>This is used for optimistic concurrency control - the event store checks
+that the version hasn’t changed since the aggregate was loaded.</p>
+<h5 id="example-2"><a class="doc-anchor" href="#example-2">§</a>Example</h5>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">fn </span>version(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; i64 {
+    <span class="self">self</span>.version
+}
+<span class="kw">let </span>aggregate = UserAggregate::default();
+<span class="macro">assert_eq!</span>(aggregate.version(), <span class="number">0</span>); <span class="comment">// New aggregate</span></code></pre></div></div></details><details class="toggle method-toggle" open><summary><section id="tymethod.handle" class="method"><a class="src rightside" href="../../src/arc_core/aggregate.rs.html#852">Source</a><h4 class="code-header">fn <a href="#tymethod.handle" class="fn">handle</a>&lt;'life0, 'async_trait&gt;(
+    &amp;'life0 self,
+    command: Self::<a class="associatedtype" href="trait.Aggregate.html#associatedtype.Command" title="type arc_core::aggregate::Aggregate::Command">Command</a>,
+) -&gt; <a class="struct" href="https://doc.rust-lang.org/1.99.0/core/pin/struct.Pin.html" title="struct core::pin::Pin">Pin</a>&lt;<a class="struct" href="https://doc.rust-lang.org/1.99.0/alloc/boxed/struct.Box.html" title="struct alloc::boxed::Box">Box</a>&lt;dyn <a class="trait" href="https://doc.rust-lang.org/1.99.0/core/future/future/trait.Future.html" title="trait core::future::future::Future">Future</a>&lt;Output = <a class="enum" href="https://doc.rust-lang.org/1.99.0/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="struct" href="https://doc.rust-lang.org/1.99.0/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="struct" href="../event/struct.Event.html" title="struct arc_core::event::Event">Event</a>&gt;, Self::<a class="associatedtype" href="trait.Aggregate.html#associatedtype.Error" title="type arc_core::aggregate::Aggregate::Error">Error</a>&gt;&gt; + <a class="trait" href="https://doc.rust-lang.org/1.99.0/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + 'async_trait&gt;&gt;<div class="where">where
+    Self: 'async_trait,
+    'life0: 'async_trait,</div></h4></section></summary><div class="docblock"><p>Handle a command and produce events.</p>
+<p>This is where your business logic lives. The method should:</p>
+<ol>
+<li>Inspect current state (<code>self</code>) to make decisions</li>
+<li>Validate the command against business rules</li>
+<li>Return error if validation fails</li>
+<li>Produce one or more events if validation succeeds</li>
+<li>Return empty vec if command has no effect</li>
+</ol>
+<p><strong>Important</strong>: This method should have no side effects:</p>
+<ul>
+<li>Don’t write to databases</li>
+<li>Don’t call external APIs</li>
+<li>Don’t mutate state</li>
+</ul>
+<p>Side effects happen in projections and event handlers.</p>
+<h5 id="arguments"><a class="doc-anchor" href="#arguments">§</a>Arguments</h5>
+<ul>
+<li><code>command</code>: The command to handle</li>
+</ul>
+<h5 id="returns"><a class="doc-anchor" href="#returns">§</a>Returns</h5>
+<ul>
+<li><code>Ok(Vec&lt;Event&gt;)</code>: One or more events to persist and publish</li>
+<li><code>Err(Self::Error)</code>: Validation or business rule failure</li>
+</ul>
+<h5 id="example-3"><a class="doc-anchor" href="#example-3">§</a>Example</h5>
+<div class="example-wrap ignore"><a href="#" class="tooltip" title="This example is not tested">ⓘ</a><pre class="rust rust-example-rendered"><code><span class="kw">async fn </span>handle(<span class="kw-2">&amp;</span><span class="self">self</span>, command: <span class="self">Self</span>::Command) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;Event&gt;, <span class="self">Self</span>::Error&gt; {
+    <span class="kw">match </span>command {
+        UserCommand::CreateUser { id, name, email } =&gt; {
+            <span class="comment">// Check invariant
+            </span><span class="kw">if </span><span class="self">self</span>.created {
+                <span class="kw">return </span><span class="prelude-val">Err</span>(UserError::AlreadyExists);
+            }
+
+            <span class="comment">// Validate input
+            </span><span class="kw">if </span>!email.contains(<span class="string">'@'</span>) {
+                <span class="kw">return </span><span class="prelude-val">Err</span>(UserError::InvalidEmail);
+            }
+
+            <span class="comment">// Produce event
+            </span><span class="prelude-val">Ok</span>(<span class="macro">vec!</span>[Event::new(NewEvent {
+                        aggregate_type: <span class="string">"User"</span>,
+                        aggregate_id: <span class="kw-2">&amp;</span>id,
+                        sequence: <span class="self">self</span>.version + <span class="number">1</span>,
+                        event_type: <span class="string">"UserCreated"</span>,
+                        payload: ...,
+                    })])
+        }
+    }
+}</code></pre></div></div></details><details class="toggle method-toggle" open><summary><section id="tymethod.apply" class="method"><a class="src rightside" href="../../src/arc_core/aggregate.rs.html#888">Source</a><h4 class="code-header">fn <a href="#tymethod.apply" class="fn">apply</a>(&amp;mut self, event: &amp;<a class="struct" href="../event/struct.Event.html" title="struct arc_core::event::Event">Event</a>)</h4></section></summary><div class="docblock"><p>Apply an event to update aggregate state.</p>
+<p>This method must be <strong>deterministic</strong> and <strong>side-effect free</strong>:</p>
+<ul>
+<li>Same events always produce same state</li>
+<li>No I/O operations</li>
+<li>No randomness</li>
+<li>No external dependencies</li>
+</ul>
+<p>The event is already persisted when this is called. Your job is to
+update the aggregate’s internal state to reflect the event.</p>
+<h5 id="arguments-1"><a class="doc-anchor" href="#arguments-1">§</a>Arguments</h5>
+<ul>
+<li><code>event</code>: The event to apply (already persisted)</li>
+</ul>
+<h5 id="example-4"><a class="doc-anchor" href="#example-4">§</a>Example</h5>
+<div class="example-wrap ignore"><a href="#" class="tooltip" title="This example is not tested">ⓘ</a><pre class="rust rust-example-rendered"><code><span class="kw">fn </span>apply(<span class="kw-2">&amp;mut </span><span class="self">self</span>, event: <span class="kw-2">&amp;</span>Event) {
+    <span class="self">self</span>.version = event.sequence;
+
+    <span class="kw">match </span>event.event_type.as_str() {
+        <span class="string">"UserCreated" </span>=&gt; {
+            <span class="self">self</span>.id = <span class="prelude-val">Some</span>(event.payload[<span class="string">"id"</span>].as_str().unwrap().to_string());
+            <span class="self">self</span>.name = <span class="prelude-val">Some</span>(event.payload[<span class="string">"name"</span>].as_str().unwrap().to_string());
+            <span class="self">self</span>.created = <span class="bool-val">true</span>;
+        }
+        <span class="string">"ProfileUpdated" </span>=&gt; {
+            <span class="self">self</span>.name = <span class="prelude-val">Some</span>(event.payload[<span class="string">"name"</span>].as_str().unwrap().to_string());
+        }
+        <span class="kw">_ </span>=&gt; {} <span class="comment">// Unknown event types are ignored
+    </span>}
+}</code></pre></div></div></details></div><h2 id="provided-methods" class="section-header">Provided Methods<a href="#provided-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="method.from_events" class="method"><a class="src rightside" href="../../src/arc_core/aggregate.rs.html#973-979">Source</a><h4 class="code-header">fn <a href="#method.from_events" class="fn">from_events</a>(events: <a class="struct" href="https://doc.rust-lang.org/1.99.0/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="struct" href="../event/struct.Event.html" title="struct arc_core::event::Event">Event</a>&gt;) -&gt; Self</h4></section></summary><div class="docblock"><p>Reconstruct aggregate from its event stream.</p>
+<p>This method has a default implementation that:</p>
+<ol>
+<li>Creates a new aggregate instance using <code>Default::default()</code></li>
+<li>Applies each event in order using <code>apply()</code></li>
+<li>Returns the reconstructed aggregate</li>
+</ol>
+<p>You typically don’t need to override this unless you have special requirements.</p>
+<h5 id="arguments-2"><a class="doc-anchor" href="#arguments-2">§</a>Arguments</h5>
+<ul>
+<li><code>events</code>: The complete event stream for this aggregate</li>
+</ul>
+<h5 id="returns-1"><a class="doc-anchor" href="#returns-1">§</a>Returns</h5>
+<p>A fully reconstructed aggregate with all events applied</p>
+<h5 id="example-5"><a class="doc-anchor" href="#example-5">§</a>Example</h5>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="comment">// Load events from event store
+</span><span class="kw">let </span>events = <span class="macro">vec!</span>[
+    Event::new(NewEvent {
+        aggregate_type: <span class="string">"User"</span>,
+        aggregate_id: <span class="string">"user-123"</span>,
+        sequence: <span class="number">1</span>,
+        event_type: <span class="string">"UserCreated"</span>,
+        payload: <span class="macro">serde_json::json!</span>({<span class="string">"id"</span>: <span class="string">"user-123"</span>}),
+    }),
+    Event::new(NewEvent {
+        aggregate_type: <span class="string">"User"</span>,
+        aggregate_id: <span class="string">"user-123"</span>,
+        sequence: <span class="number">2</span>,
+        event_type: <span class="string">"ProfileUpdated"</span>,
+        payload: <span class="macro">serde_json::json!</span>({<span class="string">"name"</span>: <span class="string">"Alice"</span>}),
+    }),
+];
+
+<span class="comment">// Reconstruct aggregate
+</span><span class="kw">let </span>aggregate = UserAggregate::from_events(events);
+
+<span class="macro">assert_eq!</span>(aggregate.version(), <span class="number">2</span>);
+<span class="macro">assert!</span>(aggregate.created);</code></pre></div></div></details><details class="toggle method-toggle" open><summary><section id="method.to_snapshot" class="method"><a class="src rightside" href="../../src/arc_core/aggregate.rs.html#986-988">Source</a><h4 class="code-header">fn <a href="#method.to_snapshot" class="fn">to_snapshot</a>(&amp;self) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.99.0/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="enum" href="https://docs.rs/serde_json/1.0.151/serde_json/value/enum.Value.html" title="enum serde_json::value::Value">Value</a>&gt;</h4></section></summary><div class="docblock"><p>Serialize current state for snapshotting.</p>
+<p>Default returns <code>None</code>: an aggregate opts out and is always reconstructed
+by replaying its stream. Override to return <code>Some(state)</code> — typically via
+<code>serde_json::to_value(self)</code> — once the aggregate is <code>Serialize</code>.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.from_snapshot" class="method"><a class="src rightside" href="../../src/arc_core/aggregate.rs.html#996-1002">Source</a><h4 class="code-header">fn <a href="#method.from_snapshot" class="fn">from_snapshot</a>(state: <a class="enum" href="https://docs.rs/serde_json/1.0.151/serde_json/value/enum.Value.html" title="enum serde_json::value::Value">Value</a>) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.99.0/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;Self&gt;<div class="where">where
+    Self: <a class="trait" href="https://doc.rust-lang.org/1.99.0/core/marker/trait.Sized.html" title="trait core::marker::Sized">Sized</a>,</div></h4></section></summary><div class="docblock"><p>Reconstruct an aggregate from a previously snapshotted state.</p>
+<p>Default returns <code>None</code> so a loader falls back to stream replay. Override
+to deserialize the value produced by <code>to_snapshot</code>. <code>Option</code> (rather than
+<code>Result</code>) keeps the contract simple: a <code>None</code> — whether opted out or a
+failed decode — is always handled by replaying from sequence 0.</p>
+</div></details></div><h2 id="dyn-compatibility" class="section-header">Dyn Compatibility<a href="#dyn-compatibility" class="anchor">§</a></h2><div class="dyn-compatibility-info"><p>This trait is <b>not</b> <a href="https://doc.rust-lang.org/1.99.0/reference/items/traits.html#dyn-compatibility">dyn compatible</a>.</p><p><i>In older versions of Rust, dyn compatibility was called "object safety".</i></p></div><h2 id="implementors" class="section-header">Implementors<a href="#implementors" class="anchor">§</a></h2><div id="implementors-list"></div><script src="../../trait.impl/arc_core/aggregate/trait.Aggregate.js" async></script></section></div></main></body></html>

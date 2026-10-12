@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ADMIN","USER"],"struct":["RbacPlugin","RequireRoles","RoleCheck","SimpleRbac"]};
