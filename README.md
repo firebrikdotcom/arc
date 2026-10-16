@@ -2,9 +2,42 @@
   <img src="docs/imgs/arc-banner.jpg" alt="Arc: immutable architecture. Event sourced, CQRS core, Rust engine." width="100%">
 </p>
 
+<p align="center">
+  <a href="https://github.com/firebrikdotcom/arc/actions/workflows/ci.yml?query=branch%3Amaster"><img src="https://github.com/firebrikdotcom/arc/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI status"></a>
+  <a href="https://github.com/firebrikdotcom/arc/actions/workflows/security.yml?query=branch%3Amaster"><img src="https://github.com/firebrikdotcom/arc/actions/workflows/security.yml/badge.svg?branch=master" alt="Security status"></a>
+  <a href="https://github.com/firebrikdotcom/arc/actions/workflows/ci.yml?query=branch%3Amaster"><img src="https://img.shields.io/badge/coverage-CI_report-0969da" alt="Coverage: view the Code Coverage job in CI"></a>
+  <a href="https://crates.io/crates/arc-web-cli"><img src="https://img.shields.io/crates/v/arc-web-cli.svg?label=crates.io" alt="Latest CLI version on crates.io"></a>
+  <a href="LICENSE-MIT"><img src="https://img.shields.io/badge/license-MIT%20%2F%20Apache--2.0-blue" alt="License: MIT or Apache-2.0"></a>
+</p>
+
+<p align="center">
+  <a href="https://arc-framework.com"><strong>Website</strong></a>
+  &nbsp; · &nbsp;
+  <a href="https://firebrikdotcom.github.io/arc/"><strong>Documentation</strong></a>
+  &nbsp; · &nbsp;
+  <a href="https://github.com/firebrikdotcom/arc/releases">Releases</a>
+</p>
+
 Arc is a beta Rust framework for event-sourced web applications.
 
 It uses Actix Web, Tera, SQLite or Postgres, NATS JetStream, and Benthos. Browser routes use cookie sessions; API routes use JWT bearer authentication.
+
+## Quality checks
+
+The [CI workflow](https://github.com/firebrikdotcom/arc/actions/workflows/ci.yml) and
+[Security workflow](https://github.com/firebrikdotcom/arc/actions/workflows/security.yml)
+run these checks:
+
+- Debug/release builds on Linux, macOS and Windows with stable and nightly Rust; tests on Linux with stable Rust.
+- Formatting and Clippy with warnings denied.
+- Browser authentication, CRUD, bounded-collection and durable-audit regressions.
+- Rust and npm dependency audits, secrets scanning, CodeQL and Semgrep.
+- Coverage generation, documentation checks and frontend builds.
+
+The coverage badge links to CI's Code Coverage job; it does not claim a minimum
+coverage percentage. Codecov uploads are best-effort. Version and license badges
+show package metadata, not quality certification. Arc is licensed under
+[MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
 
 ## Start a new application
 
