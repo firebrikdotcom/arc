@@ -3,14 +3,13 @@
 Arc's reusable crates are published in dependency order:
 
 1. `arc-core`
-2. `arc-es-sqlite`
-3. `arc-es-postgres`
-4. `arc-es-nats`
-5. `arc-web`
-6. `arc-auth-core`
-7. `arc-auth-db`, `arc-auth-session`, `arc-auth-jwt`, and `arc-auth-rbac`
-8. `arc-auth-admin`
-9. `arc-web-cli`
+2. `arc-auth-core`
+3. `arc-es-sqlite`, `arc-es-postgres`, and `arc-es-nats`
+4. `arc-web`
+5. `arc-auth-db`, `arc-auth-session`, and `arc-auth-jwt`
+6. `arc-auth-admin`
+7. `arc-auth-rbac` (its packaged tests depend on `arc-auth-admin`)
+8. `arc-web-cli`
 
 The storage and NATS crates depend on `arc-core` by version, with a local `path` retained for
 workspace development. Publish or make `arc-core` available in the registry before running
@@ -44,6 +43,9 @@ it will package the next crate. Run the same gate and publish sequentially:
 make publish-check PUBLISH_CRATES=arc-core
 cargo publish -p arc-core
 
+make publish-check PUBLISH_CRATES=arc-auth-core
+cargo publish -p arc-auth-core
+
 make publish-check PUBLISH_CRATES="arc-es-sqlite arc-es-postgres arc-es-nats"
 cargo publish -p arc-es-sqlite
 cargo publish -p arc-es-postgres
@@ -52,12 +54,15 @@ cargo publish -p arc-es-nats
 make publish-check PUBLISH_CRATES=arc-web
 cargo publish -p arc-web
 
-make publish-check PUBLISH_CRATES="arc-auth-core arc-auth-db arc-auth-session arc-auth-admin arc-auth-jwt arc-auth-rbac"
-cargo publish -p arc-auth-core
+make publish-check PUBLISH_CRATES="arc-auth-db arc-auth-session arc-auth-jwt"
 cargo publish -p arc-auth-db
 cargo publish -p arc-auth-session
-cargo publish -p arc-auth-admin
 cargo publish -p arc-auth-jwt
+
+make publish-check PUBLISH_CRATES=arc-auth-admin
+cargo publish -p arc-auth-admin
+
+make publish-check PUBLISH_CRATES=arc-auth-rbac
 cargo publish -p arc-auth-rbac
 
 make publish-check PUBLISH_CRATES=arc-web-cli
@@ -68,6 +73,7 @@ Publish in dependency order:
 
 ```bash
 cargo publish -p arc-core --dry-run
+cargo publish -p arc-auth-core --dry-run
 cargo publish -p arc-es-sqlite --dry-run
 cargo publish -p arc-es-postgres --dry-run
 cargo publish -p arc-es-nats --dry-run
@@ -82,7 +88,7 @@ cache.
 
 ## Public API Policy
 
-All six reusable crates are pre-1.0 and versioned in lockstep. Within a
+All twelve reusable crates are pre-1.0 and versioned in lockstep. Within a
 compatible minor release line:
 
 - Keep `arc-core` traits source-compatible unless there is a documented migration.

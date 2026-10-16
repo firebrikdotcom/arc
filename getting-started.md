@@ -16,6 +16,23 @@ cargo install arc-web-cli
 
 The package installs the `arc` command.
 
+Use `--help` or `-h` on any generator command to see its own usage and options:
+
+```bash
+arc --help
+arc new --help
+arc generate --help
+arc generate resource --help
+arc generate aggregate --help
+arc plugin --help
+arc plugin add --help
+arc plugin migrate-auth-ui --help
+```
+
+Help works before or after a resource, project, or plugin name, including when a
+required name or option value is missing. It does not generate files, install
+plugins, or migrate a UI, and works outside an Arc application directory.
+
 ## 2. Create a project
 
 Minimal server:
