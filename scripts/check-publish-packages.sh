@@ -8,7 +8,7 @@ version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
 if (($#)); then
     crates=("$@")
 else
-    crates=(arc-core arc-es-sqlite arc-es-postgres arc-es-nats arc-web arc-auth-core arc-auth-db arc-auth-session arc-auth-admin arc-auth-jwt arc-auth-rbac arc-web-cli)
+    crates=(arc-core arc-auth-core arc-es-sqlite arc-es-postgres arc-es-nats arc-web arc-auth-db arc-auth-session arc-auth-jwt arc-auth-admin arc-auth-rbac arc-web-cli)
 fi
 
 # Package the release together so Cargo can resolve unpublished workspace versions.

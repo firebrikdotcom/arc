@@ -1,9 +1,13 @@
 # Arc Project Progress
 
-**Last updated:** 2026-10-11
-**Current development version:** 0.8.9
+**Last updated:** 2026-10-15
+**Current development version:** 0.8.10
 **Latest published version:** 0.8.9
-**Status:** v0.8.9 updates all twelve published crates to `MIT OR Apache-2.0` and
+**Status:** v0.8.10 fixes command-specific `--help` and `-h` across the Arc CLI,
+without generating files or executing plugin operations. Release assets explicitly
+build and verify the CLI executable. The latest crates.io packages remain 0.8.9;
+the GitHub source release and a tagged CLI installation are separate from registry publication.
+v0.8.9 updates all twelve published crates to `MIT OR Apache-2.0` and
 the `https://github.com/firebrikdotcom/arc` repository. It retains the v0.8.8 security
 work, which integrates three further security workstreams — bounded collection
 reads, a durable SQLite read-audit journal, and durable browser-session invalidation —

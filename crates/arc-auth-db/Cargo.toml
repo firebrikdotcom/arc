@@ -8,8 +8,8 @@ repository.workspace = true
 description = "Database identity and role provider plugin for Arc"
 
 [dependencies]
-arc-auth-core = { path = "../arc-auth-core", version = "0.8.9" }
-arc-web = { path = "../arc-web", version = "0.8.9" }
+arc-auth-core = { path = "../arc-auth-core", version = "0.8.10" }
+arc-web = { path = "../arc-web", version = "0.8.10" }
 argon2.workspace = true
 async-trait.workspace = true
 diesel.workspace = true

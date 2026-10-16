@@ -140,7 +140,7 @@ jobs:
             os: ubuntu-latest
             name: arc-linux-x86_64
           - target: x86_64-apple-darwin
-            os: macos-latest
+            os: macos-15-intel
             name: arc-macos-x86_64
           - target: aarch64-apple-darwin
             os: macos-latest
@@ -159,7 +159,19 @@ jobs:
           target: ${{ matrix.target }}
 
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --locked -p arc-web-cli --bin arc --target ${{ matrix.target }}
+
+      - name: Verify CLI binary
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ needs.create-release.outputs.version }}
+        run: |
+          BINARY="target/${{ matrix.target }}/release/arc"
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            BINARY="${BINARY}.exe"
+          fi
+          test "$("$BINARY" --version)" = "arc ${EXPECTED_VERSION#v}"
+          "$BINARY" generate resource --help
 
       - name: Strip binary (Linux/macOS)
         if: matrix.os != 'windows-latest'

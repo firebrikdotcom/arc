@@ -1,6 +1,16 @@
 # Published Packages
 
-The latest published package version is **0.8.9**. Source version **0.8.9** includes
+The latest published package version is **0.8.9**. Source version **0.8.10** adds
+command-specific, read-only CLI help and verifies that release downloads contain
+the generator executable. Install this source release directly from its tag:
+
+```bash
+cargo install --git https://github.com/firebrikdotcom/arc --tag v0.8.10 arc-web-cli --locked --force
+```
+
+The 0.8.10 crates have not been published to crates.io. Generated applications
+request matching crate versions, so wait for registry publication before setting
+up a new 0.8.10 application from registry dependencies. Version 0.8.9 includes
 the merged security workstreams and publishes all twelve Arc crates under
 `MIT OR Apache-2.0`, with the repository set to
 <https://github.com/firebrikdotcom/arc>. Crates.io publication for this release is
