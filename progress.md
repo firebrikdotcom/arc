@@ -21,6 +21,17 @@ observability, and developer experience.
 This is the canonical project-status and roadmap tracker. Current source code and accepted ADRs
 take precedence when a claim here becomes stale.
 
+## CI repair — 2026-10-15
+
+- Completion requires passing CI and Security on the final pushed commit.
+- Updated the locked Rustls dependency to 0.23.46 to address four advisories.
+- Replaced the organization-licensed Gitleaks action with the digest-pinned standalone
+  scanner, retaining full-history scans, redacted output and the existing placeholder allowlist.
+- Moved repository frontend tooling to Tailwind 4 with compatibility utilities; removed
+  the vulnerable documentation server and copy-plugin dependency chains. `make docs`
+  and `npm run docs:serve` now use Vite to serve the existing Docsify site.
+- Hosted verification remains pending until the repair is pushed and its workflows pass.
+
 ## Licensing — 2026-10-11
 
 - Arc is dual licensed under MIT or Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`);

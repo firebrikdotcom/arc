@@ -1,5 +1,5 @@
 import { resolve } from 'path';
-import copy from 'rollup-plugin-copy';
+import { cpSync, existsSync } from 'node:fs';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
@@ -21,14 +21,12 @@ export default defineConfig({
         manifest: true,
     },
     plugins: [
-        copy({
-            targets: [
-                {
-                    src: 'crates/arc-app/src/resources/imgs/**/*',
-                    dest: 'dist/imgs',
-                },
-            ],
-            hook: 'writeBundle',
-        }),
+        {
+            name: 'arc-copy-images',
+            writeBundle() {
+                const source = resolve(__dirname, 'crates/arc-app/src/resources/imgs');
+                if (existsSync(source)) cpSync(source, resolve(__dirname, 'dist/imgs'), { recursive: true });
+            },
+        },
     ],
 });

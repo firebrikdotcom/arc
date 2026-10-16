@@ -242,11 +242,7 @@ frontend-install: ## Install npm dependencies only
 DOCSIFY_PORT ?= 3001
 docsify docs: ## Serve docs/ locally with Docsify (DOCSIFY_PORT=3001)
 	@echo "$(GREEN)Serving docs/ at http://localhost:$(DOCSIFY_PORT)$(NC)"
-	@if [ ! -d node_modules/docsify-cli ] && ! command -v docsify >/dev/null 2>&1; then \
-		echo "$(YELLOW)docsify-cli not found; run: npm install$(NC)"; \
-		exit 1; \
-	fi
-	npx docsify serve docs --port $(DOCSIFY_PORT)
+	npm run docs:serve -- --port $(DOCSIFY_PORT)
 
 ##@ Cleanup
 

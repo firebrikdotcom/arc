@@ -115,3 +115,17 @@ make test
 ```
 
 Clone the Arc repository only when contributing to the framework itself.
+
+## Working on the framework repository
+
+Run `npm ci` and `npm run build` to build the repository frontend with Tailwind 4.
+The existing JavaScript theme configuration and legacy shadow, border and radius
+utilities are retained for the admin templates. Generated UI starters do not use
+this repository frontend toolchain.
+
+Run `make docs` (or `npm run docs:serve`) to serve the existing Docsify site through
+Vite on port 3001. `make docs DOCSIFY_PORT=3002` selects another port.
+
+Before finishing a change, run local verification and confirm that CI and Security
+pass on the final pushed commit. Security scans cover the Rust and npm lockfiles
+and full Git history; the standalone Gitleaks scanner needs no organization license.
