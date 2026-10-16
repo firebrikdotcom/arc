@@ -2,11 +2,11 @@
 
 **Last updated:** 2026-10-15
 **Current development version:** 0.8.10
-**Latest published version:** 0.8.9
+**Latest published version:** 0.8.10
 **Status:** v0.8.10 fixes command-specific `--help` and `-h` across the Arc CLI,
 without generating files or executing plugin operations. Release assets explicitly
-build and verify the CLI executable. The latest crates.io packages remain 0.8.9;
-the GitHub source release and a tagged CLI installation are separate from registry publication.
+build and verify the CLI executable. All twelve matching 0.8.10 crates are
+published to crates.io, so generated apps resolve the matching framework and plugins.
 v0.8.9 updates all twelve published crates to `MIT OR Apache-2.0` and
 the `https://github.com/firebrikdotcom/arc` repository. It retains the v0.8.8 security
 work, which integrates three further security workstreams — bounded collection
