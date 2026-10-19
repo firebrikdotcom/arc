@@ -20,7 +20,7 @@ FROM node:20-bookworm-slim AS frontend-builder
 WORKDIR /build
 COPY package.json package-lock.json* ./
 RUN npm ci
-COPY vite.config.js postcss.config.js tailwind.config.js ./
+COPY vite.config.js ./
 COPY resources ./resources
 RUN npm run build || true
 

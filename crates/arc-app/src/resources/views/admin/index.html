@@ -1,19 +1,27 @@
-{% import "parts/components.html" as components %}
-
 {% include "parts/html-head.html" %}
 
-<body class="h-full bg-white dark:bg-gray-900" data-controller="notification mobile-menu dark-mode dropdown websocket">
+<body data-controller="notification websocket">
+<a class="skip-link" href="#workspace">Skip to workspace</a>
+{% include "parts/notification.html" %}
 
-{% include "admin/parts/side-menu.html" %}
+<div class="workbench">
+    <aside class="rail">
+        <a class="brand brand--rail" href="/admin"><span class="brand__mark">A</span><span class="rail__label">{% if name %}{{ name }}{% else %}Arc{% endif %}</span></a>
+        <nav aria-label="Application">
+            <a href="/admin" title="Dashboard"><span class="rail__glyph" aria-hidden="true">D</span><span class="rail__label">Dashboard</span></a>
+            <a href="/admin/profile" title="Profile"><span class="rail__glyph" aria-hidden="true">P</span><span class="rail__label">Profile</span></a>
+            <a href="/admin/settings" title="Settings"><span class="rail__glyph" aria-hidden="true">S</span><span class="rail__label">Settings</span></a>
+        </nav>
+    </aside>
 
-<div class="lg:pl-72">
-    {% include "parts/notification.html" %}
-    {% include "admin/parts/top-menu.html" %}
+    <header class="topbar">
+        <button type="button" class="rail-toggle" data-rail-toggle aria-expanded="true" aria-label="Collapse navigation"></button>
+        <span class="mono">{{ user_name }}</span>
+        <a class="button" href="/signout">Sign out</a>
+    </header>
 
-    <main class="py-10 bg-white dark:bg-gray-900 min-h-screen">
-        <div class="px-4 sm:px-6 lg:px-8 text-gray-900 dark:text-white">
-            {% block content %}{% endblock content %}
-        </div>
+    <main id="workspace" class="workspace">
+        {% block content %}{% endblock content %}
     </main>
 </div>
 

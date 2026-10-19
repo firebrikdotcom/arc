@@ -46,12 +46,12 @@ deps-check: ## Check if all required system dependencies are installed
 # Run dev server with hot-reload, watches Rust code changes and bundles frontend with Vite
 dev: ## Start development server with hot-reload and Vite bundling
 	@echo "$(GREEN)Starting development server...$(NC)"
-	cargo run develop
+	cargo run -p arc -- develop
 
 # Start production server without file watching or hot-reload
 serve: ## Start production server without hot-reload
 	@echo "$(GREEN)Starting production server...$(NC)"
-	cargo run serve
+	cargo run -p arc -- serve
 
 # Compile optimized binary with full optimizations (slower build, faster runtime)
 build: ## Build the project in release mode
@@ -73,7 +73,7 @@ watch: ## Watch for changes and rebuild (requires cargo-watch)
 # Apply all pending Diesel migrations to update database schema
 migrate: ## Run database migrations
 	@echo "$(GREEN)Running database migrations...$(NC)"
-	cargo run migrate
+	cargo run -p arc -- migrate
 
 # Create new aggregate from template
 new-aggregate: ## Scaffold a new CommandBus aggregate (usage: make new-aggregate NAME=Task)
@@ -87,7 +87,7 @@ new-aggregate: ## Scaffold a new CommandBus aggregate (usage: make new-aggregate
 # Populate database with initial sample data for development
 seed: ## Seed the database with sample data
 	@echo "$(GREEN)Seeding database...$(NC)"
-	cargo run seed
+	cargo run -p arc -- seed
 
 # Run migrations then seed - complete database initialization
 db-setup: migrate seed ## Setup database (migrate + seed)
@@ -203,7 +203,7 @@ e2e-install: ## Install Playwright + Chromium (one-time)
 # Compile the Rust binary and build frontend assets so the E2E run hits a real, complete server
 e2e-build: ## Build binary + frontend assets for E2E
 	@echo "$(GREEN)Building binary + frontend for E2E...$(NC)"
-	cargo build --bin arc
+	cargo build -p arc --bin arc
 	npm run build
 
 # Run the full Playwright suite. Spawns server, runs migrations + seed, executes specs, tears down.
@@ -231,7 +231,7 @@ frontend-dev: ## Run Vite development server
 	@echo "$(GREEN)Starting Vite development server...$(NC)"
 	npm run dev
 
-# Install only npm/JavaScript dependencies (Tailwind, Vite, Hotwire)
+# Install only npm/JavaScript dependencies (Vite, Hotwire, Toastify)
 frontend-install: ## Install npm dependencies only
 	@echo "$(GREEN)Installing npm dependencies...$(NC)"
 	npm install
@@ -272,7 +272,7 @@ run: ## Run custom cargo command (usage: make run CMD="your command")
 		echo "$(YELLOW)Usage: make run CMD=\"your command\"$(NC)"; \
 		exit 1; \
 	fi
-	cargo run $(CMD)
+	cargo run -p arc -- $(CMD)
 
 # Tail application log files if logs directory exists
 logs: ## View application logs (if implemented)

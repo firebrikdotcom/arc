@@ -64,3 +64,5 @@ Open <http://127.0.0.1:8080/about>.
 ## Current UI scope
 
 The `--ui` starter provides Tera and static-file serving only. It does not generate forms, CSRF integration, authentication, Tailwind, Stimulus, Turbo, Vite, or the repository's admin screens.
+
+The admin layout is the Workbench design: `public/styles.css` plus `public/workbench.js`, a dependency-free script loaded in `<head>`. On desktop widths the topbar button collapses the navigation rail to one-letter glyphs (each link keeps its full name for screen readers and as a tooltip) and remembers the choice in `localStorage` under `arc:rail`. The script also marks the rail link for the current page with `aria-current="page"`. Below 850px the rail stacks above the page and the toggle is hidden.

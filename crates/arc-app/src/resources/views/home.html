@@ -1,14 +1,24 @@
 {% include "parts/html-head.html" %}
 
 <body data-controller="notification">
-
-    {% include "parts/notification.html" %}
-
-    {% include "parts/header.html" %}
-
-    {% include "parts/hero.html" %}
-
-    {% include "parts/footer.html" %}
-
+<a class="skip-link" href="#content">Skip to content</a>
+{% include "parts/notification.html" %}
+<main id="content" class="focused-shell">
+    <a class="brand" href="/"><span class="brand__mark">A</span><span>{% if name %}{{ name }}{% else %}Arc{% endif %}</span></a>
+    <section class="focused-panel">
+        <p class="eyebrow">Arc application / ready</p>
+        <h1>{% if name %}{{ name }}{% else %}Arc{% endif %}</h1>
+        <p class="lede">An event-sourced application with a server-rendered operational interface.</p>
+        <div class="actions">
+            {% if user_authenticated == "true" %}
+            <a class="button button--primary" href="/admin">Open workbench</a>
+            {% else %}
+            <a class="button button--primary" href="/signin">Sign in</a>
+            {% endif %}
+            <a class="button" href="https://github.com/firebrikdotcom/arc">View on GitHub</a>
+        </div>
+    </section>
+    <p class="build-mark">ARC / INSTRUMENT PANEL</p>
+</main>
 </body>
 </html>

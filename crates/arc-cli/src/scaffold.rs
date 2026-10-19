@@ -110,6 +110,11 @@ const FILES: &[TemplateFile] = &[
         ui_only: true,
     },
     TemplateFile {
+        path: "public/workbench.js",
+        contents: include_str!("../templates/public/workbench.js"),
+        ui_only: true,
+    },
+    TemplateFile {
         path: "migrations/00000000000000_arc_base/up.sql",
         contents: include_str!("../templates/migrations/arc_base/up.sql"),
         ui_only: false,
@@ -278,6 +283,7 @@ mod tests {
         assert!(root.join("resources/views/home.html").is_file());
         assert!(root.join("resources/views/layouts/admin.html").is_file());
         assert!(root.join("resources/views/errors/500.html").is_file());
+        assert!(root.join("public/workbench.js").is_file());
         assert!(!root.join("resources/views/auth/signin.html").exists());
         assert!(!root.join("src/domain/user/aggregate.rs").exists());
         assert!(!root.join("resources/views/admin/settings.html").exists());

@@ -51,10 +51,11 @@ export default class extends Controller {
      */
     getBackgroundColor(type) {
         const colors = {
-            success: "linear-gradient(to right, #00b09b, #96c93d)",
-            error: "linear-gradient(to right, #ff5f6d, #ffc371)",
-            warning: "linear-gradient(to right, #f7971e, #ffd200)",
-            info: "linear-gradient(to right, #2193b0, #6dd5ed)",
+            // Workbench palette (see crates/arc-cli/templates/public/styles.css)
+            success: "#286747",
+            error: "#a52c20",
+            warning: "#9a6412",
+            info: "#171714",
         };
         return colors[type] || colors.info;
     }

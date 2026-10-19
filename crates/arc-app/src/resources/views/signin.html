@@ -1,8 +1,30 @@
 {% include "parts/html-head.html" %}
 
-<body data-controller="notification dark-mode">
-
-{% include "admin/signin-form.html" %}
-
+<body data-controller="notification">
+<a class="skip-link" href="#content">Skip to content</a>
+<main id="content" class="focused-shell">
+    <a class="brand" href="/"><span class="brand__mark">A</span><span>{% if name %}{{ name }}{% else %}Arc{% endif %}</span></a>
+    <section class="focused-panel">
+        <p class="eyebrow">Authorized operators</p>
+        <h1>Sign in</h1>
+        <p class="lede">Enter your credentials to open the workbench.</p>
+        {% if session_message | length > 0 %}
+        <div class="alert alert--error" role="alert">{{ session_message }}</div>
+        {% endif %}
+        <form action="/signin" method="POST" data-turbo="false">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="field">
+                <label for="email">Email address</label>
+                <input id="email" name="email" type="email" autocomplete="email" required>
+            </div>
+            <div class="field">
+                <label for="password">Password</label>
+                <input id="password" name="password" type="password" autocomplete="current-password" required>
+            </div>
+            <button type="submit" class="button button--primary button--wide">Sign in</button>
+        </form>
+    </section>
+    <p class="build-mark">ARC / INSTRUMENT PANEL</p>
+</main>
 </body>
 </html>

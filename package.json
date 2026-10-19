@@ -1,12 +1,8 @@
 {
   "devDependencies": {
     "@playwright/test": "^1.59.1",
-    "@tailwindcss/forms": "^0.5.9",
-    "postcss": "^8.4.49",
-    "tailwindcss": "^4.3.3",
     "vite": "^6.0.7",
-    "yaml": "^2.7.0",
-    "@tailwindcss/postcss": "^4.3.3"
+    "yaml": "^2.7.0"
   },
   "scripts": {
     "build": "vite build",

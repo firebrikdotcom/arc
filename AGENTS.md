@@ -27,12 +27,12 @@ Operational guide for agents working in this repository. Keep changes aligned wi
   - `crates/arc-es-sqlite`: SQLite event store, read-model store, snapshot persistence, and JWT session revocation store.
   - `crates/arc-es-postgres`: Postgres event store, read-model store, and snapshot persistence (self-initializing schema).
   - `crates/arc-es-nats`: NATS JetStream `EventBus` implementation (the publish side).
-  - `crates/arc-app`: Actix Web application, Tera templates, Vite/Tailwind assets, auth, API/admin routes, user domain wiring.
+  - `crates/arc-app`: Actix Web application, Tera templates, Vite assets, auth, API/admin routes, user domain wiring.
 - Backend framework: Actix Web.
 - Write model: command handlers and aggregates through `CommandBus`.
 - Event store/read model: SQLite by default; Postgres available via `DATABASE_DRIVER=postgres`.
 - Server-side rendering: Tera templates in `crates/arc-app/src/resources/views/`.
-- Frontend assets: Vite, Tailwind, Stimulus, Turbo, Toastify.
+- Frontend assets: Vite, Stimulus, Turbo, Toastify. Styling is the single Workbench design: `crates/arc-app/src/resources/css/styles.css` imports `crates/arc-cli/templates/public/styles.css`, and Vite copies `crates/arc-cli/templates/public/workbench.js` (collapsible rail) to `dist/`. Change the design there so `arc new --ui` apps and the repository app stay identical.
 - Auth modes:
   - Session/cookie auth for HTML/admin routes.
   - JWT bearer auth for `/api/*`.

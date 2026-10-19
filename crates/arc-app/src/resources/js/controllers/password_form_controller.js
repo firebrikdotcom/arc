@@ -72,7 +72,7 @@ export default class extends Controller {
      */
     showIndicator() {
         if (this.hasIndicatorTarget) {
-            this.indicatorTarget.classList.remove("hidden");
+            this.indicatorTarget.hidden = false;
         }
     }
 
@@ -81,7 +81,7 @@ export default class extends Controller {
      */
     hideIndicator() {
         if (this.hasIndicatorTarget) {
-            this.indicatorTarget.classList.add("hidden");
+            this.indicatorTarget.hidden = true;
         }
     }
 

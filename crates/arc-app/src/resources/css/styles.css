@@ -1,22 +1,2 @@
-@import "tailwindcss";
-@config "../../../../../tailwind.config.js";
-
-/* Preserve the Tailwind 3 defaults used by the existing templates. */
-@layer base {
-  *, ::after, ::before, ::backdrop, ::file-selector-button {
-    border-color: var(--color-gray-200, currentColor);
-  }
-  button:not(:disabled), [role="button"]:not(:disabled) {
-    cursor: pointer;
-  }
-}
-@theme {
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --shadow-legacy: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
-}
-@utility shadow {
-  --tw-shadow: var(--shadow-legacy);
-  box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
-}
-@utility rounded-sm { border-radius: 0.125rem; }
-@utility rounded { border-radius: 0.25rem; }
+/* One design for Arc: the Workbench stylesheet that `arc new --ui` generates. */
+@import "../../../../arc-cli/templates/public/styles.css";

@@ -21,6 +21,18 @@ observability, and developer experience.
 This is the canonical project-status and roadmap tracker. Current source code and accepted ADRs
 take precedence when a claim here becomes stale.
 
+## Single Workbench design — 2026-10-19
+
+- The repository app (`crates/arc-app`) now renders the same Workbench design as
+  `arc new --ui`; its stylesheet imports `crates/arc-cli/templates/public/styles.css`
+  instead of carrying a second Tailwind design.
+- Added a collapsible navigation rail (`public/workbench.js`) to both; generated apps
+  get the file from the scaffold and from the auth UI migration.
+- Removed Tailwind, the dark-mode toggle, the off-canvas mobile menu, the profile
+  dropdown and the unused landing-page partials from the repository app.
+- Playwright: `ui-sidebar-collapse.spec.ts` covers collapse, persistence and current-page
+  marking; the dark-mode spec was removed with the feature.
+
 ## CI repair — 2026-10-15
 
 - Completion requires passing CI and Security on the final pushed commit.
@@ -270,7 +282,7 @@ and Benthos owns durable routing, retries, dedupe, dead-lettering, and HTTP/NATS
 - [x] Security workflow runs dependency auditing.
 - [x] Dockerfile and health-checked Compose services for app, Postgres, NATS, and Benthos.
 - [x] Browser E2E infrastructure.
-- [x] Tera/Vite/Tailwind/Stimulus/Turbo frontend stack.
+- [x] Tera/Vite/Stimulus/Turbo frontend stack with the shared Workbench design.
 - [x] Hashed asset caching and `/public/*` serving.
 
 ## Documentation Work

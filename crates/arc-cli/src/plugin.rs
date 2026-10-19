@@ -39,6 +39,16 @@ pub fn migrate_auth_ui(root: PathBuf) -> Result<(), String> {
         include_str!("../templates/resources/views/layouts/admin.html"),
     )
     .map_err(|e| e.to_string())?;
+    // The layout loads the rail script; older generated apps do not have it yet.
+    let rail_script = root.join("public/workbench.js");
+    if !rail_script.exists() {
+        fs::create_dir_all(root.join("public")).map_err(|e| e.to_string())?;
+        fs::write(
+            &rail_script,
+            include_str!("../templates/public/workbench.js"),
+        )
+        .map_err(|e| e.to_string())?;
+    }
     protect_admin_dashboard(&root)?;
     Ok(())
 }

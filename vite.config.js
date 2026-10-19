@@ -22,10 +22,12 @@ export default defineConfig({
     },
     plugins: [
         {
-            name: 'arc-copy-images',
+            name: 'arc-copy-static',
             writeBundle() {
                 const source = resolve(__dirname, 'crates/arc-app/src/resources/imgs');
                 if (existsSync(source)) cpSync(source, resolve(__dirname, 'dist/imgs'), { recursive: true });
+                // Shared Workbench rail script, the same file `arc new --ui` generates.
+                cpSync(resolve(__dirname, 'crates/arc-cli/templates/public/workbench.js'), resolve(__dirname, 'dist/workbench.js'));
             },
         },
     ],
