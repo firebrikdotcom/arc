@@ -1,9 +1,11 @@
 # Arc Project Progress
 
-**Last updated:** 2026-10-15
-**Current development version:** 0.8.10
+**Last updated:** 2026-10-19
+**Current development version:** 0.8.11
 **Latest published version:** 0.8.10
-**Status:** v0.8.10 fixes command-specific `--help` and `-h` across the Arc CLI,
+**Status:** v0.8.11 adds a collapsible navigation rail to the generated admin layout
+and makes the repository app use the same Workbench design as `arc new --ui`. Its
+crates are not yet published to crates.io. v0.8.10 fixes command-specific `--help` and `-h` across the Arc CLI,
 without generating files or executing plugin operations. Release assets explicitly
 build and verify the CLI executable. All twelve matching 0.8.10 crates are
 published to crates.io, so generated apps resolve the matching framework and plugins.

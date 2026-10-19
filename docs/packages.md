@@ -1,15 +1,19 @@
 # Published Packages
 
-The latest published package version is **0.8.10**. Source version **0.8.10** adds
-command-specific, read-only CLI help and verifies that release downloads contain
-the generator executable. Install this source release directly from its tag:
+The latest published package version is **0.8.10**. Source version **0.8.11** gives
+the generated admin layout a collapsible navigation rail (`public/workbench.js`) and
+makes the repository app use the same Workbench design. Install this source release
+directly from its tag:
 
 ```bash
-cargo install --git https://github.com/firebrikdotcom/arc --tag v0.8.10 arc-web-cli --locked --force
+cargo install --git https://github.com/firebrikdotcom/arc --tag v0.8.11 arc-web-cli --locked --force
 ```
 
-All twelve matching 0.8.10 packages are published to crates.io. Generated
-applications resolve the same framework and authentication-plugin versions.
+The 0.8.11 crates have not been published to crates.io. Generated applications
+request matching crate versions, so wait for registry publication before setting
+up a new 0.8.11 application from registry dependencies. Version 0.8.10 adds
+command-specific, read-only CLI help, and all twelve 0.8.10 packages are published
+to crates.io.
 Version 0.8.9 includes
 the merged security workstreams and publishes all twelve Arc crates under
 `MIT OR Apache-2.0`, with the repository set to
