@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["ARC_VERSION","FILES"],"fn":["create_project","initialize_git","render","validate_name","write_project"],"struct":["NewProject","TemplateFile"]};

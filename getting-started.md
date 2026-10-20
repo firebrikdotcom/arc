@@ -115,3 +115,18 @@ make test
 ```
 
 Clone the Arc repository only when contributing to the framework itself.
+
+## Working on the framework repository
+
+Run `npm ci` and `npm run build` to build the repository frontend with Vite.
+The repository app uses the same Workbench design that `arc new --ui` generates:
+its stylesheet imports `crates/arc-cli/templates/public/styles.css` and the build
+copies `crates/arc-cli/templates/public/workbench.js`. Generated UI starters do not
+use this repository frontend toolchain; they serve those two files from `public/`.
+
+Run `make docs` (or `npm run docs:serve`) to serve the existing Docsify site through
+Vite on port 3001. `make docs DOCSIFY_PORT=3002` selects another port.
+
+Before finishing a change, run local verification and confirm that CI and Security
+pass on the final pushed commit. Security scans cover the Rust and npm lockfiles
+and full Git history; the standalone Gitleaks scanner needs no organization license.

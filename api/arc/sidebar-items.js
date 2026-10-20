@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["domain","helpers","http"]};
+window.SIDEBAR_ITEMS = {"fn":["main","print_generate_help","print_help","print_new_help","print_requested_help","run"],"mod":["plugin","resource","scaffold"]};
