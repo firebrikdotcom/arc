@@ -1,6 +1,6 @@
 # Published Packages
 
-The latest published package version is **0.8.10**. Source version **0.8.11** gives
+The latest published package version is **0.8.11**. Source version **0.8.11** gives
 the generated admin layout a collapsible navigation rail (`public/workbench.js`) and
 makes the repository app use the same Workbench design. Install this source release
 directly from its tag:
@@ -9,9 +9,9 @@ directly from its tag:
 cargo install --git https://github.com/firebrikdotcom/arc --tag v0.8.11 arc-web-cli --locked --force
 ```
 
-The 0.8.11 crates have not been published to crates.io. Generated applications
-request matching crate versions, so wait for registry publication before setting
-up a new 0.8.11 application from registry dependencies. Version 0.8.10 adds
+All twelve matching 0.8.11 packages are published to crates.io. Generated
+applications resolve the same framework and authentication-plugin versions.
+Version 0.8.10 adds
 command-specific, read-only CLI help, and all twelve 0.8.10 packages are published
 to crates.io.
 Version 0.8.9 includes
@@ -49,8 +49,8 @@ The CLI writes normal Cargo dependencies:
 
 ```toml
 [dependencies]
-arc-core = "0.8.10"
-arc-web = "0.8.10"
+arc-core = "0.8.11"
+arc-web = "0.8.11"
 ```
 
 You may create the same application manually, but then you must also supply the environment bootstrap, migrations, aggregate, routes, and runtime entry point that the CLI normally generates.
