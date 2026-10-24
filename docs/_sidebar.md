@@ -26,6 +26,7 @@
   * [Threat Model](threat-model.md)
   * [Release Security Checklist](release-security-checklist.md)
   * [Security Test Coverage](security-test-coverage.md)
+  * [WebSocket Security](websocket-security.md)
   * [Audit Metadata](audit-metadata.md)
   * [Access Logging](access-logging.md)
   * [Idle Timeout](idle-timeout.md)

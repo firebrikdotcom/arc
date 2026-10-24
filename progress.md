@@ -1,6 +1,6 @@
 # Arc Project Progress
 
-**Last updated:** 2026-10-19
+**Last updated:** 2026-10-24
 **Current development version:** 0.8.11
 **Latest published version:** 0.8.11
 **Status:** v0.8.11 adds a collapsible navigation rail to the generated admin layout
@@ -327,6 +327,11 @@ The four dispatched security workstreams below are complete, merged into `master
 and included in the local `v0.8.7` tag (2026-09-13). The source-grounded threat model
 continues to track open controls and deployment decisions.
 
+The 2026-10-24 WebSocket-authentication and projection-origin follow-ups passed local
+focused verification on their feature branches. Their integration and required hosted
+CI remain pending. The deployment audit policy still requires owner decisions, so
+Phase 2 is not complete.
+
 - [x] Security headers and a documented CSP posture: shared runtime defaults, explicit HTML MIME types, configurable enforced/report-only CSP and opt-in HSTS. Verified with focused Rust tests, generated auth/API/browser flows, and Vite/Turbo asset checks; see [Security Headers and CSP](docs/security-headers.md).
 - [x] Input validation and adversarial security coverage for the dispatched scope:
   generated resource names are limited to 1024 UTF-8 bytes, pagination arithmetic
@@ -351,9 +356,18 @@ Remaining security follow-ups:
   generated-app checks pass; CI now runs the dedicated Compose harness. See
   [bounded collections](docs/bounded-collections.md).
 - [x] Durable read-audit persistence (2026-09-14): opt-in SQLite journal, required startup selection, migration/reopen, metadata minimization and bounded retention hook. Verified with locked workspace tests, HTTP lock/disk PHI rejection, real Chromium process-restart receipts, Clippy and Rust docs. See [operations](docs/access-logging-production-review.md).
-- [ ] Deployment audit policy: approve disclosure inventory, identifiers, retention/legal holds, storage access/encryption, archival and backup restore/erasure. No default legal duration or expanded disclosure scope is imposed.
+- [ ] Deployment audit policy: approve disclosure inventory, identifiers, retention/legal holds, storage access/encryption, archival and backup restore/erasure. No default legal duration or expanded disclosure scope is imposed. The [conversation plan](docs/deployment-audit-policy-plan.md) structures owner decisions and candidate evidence; policy remains open.
 - [x] Implement durable optional-plugin browser-session invalidation after role, active-state and password changes, logout and detected idle expiry. Old cookies cannot regain access after identity restoration; store failures deny access. See [auth plugins](docs/auth-plugins.md).
-- [ ] Resolve room authorization and projection-origin validation gaps identified by the threat model.
+- [x] WebSocket handshake and room authorization (2026-10-24): the origin allowlist,
+  current session identity check, and default own-user room policy passed the local
+  security harness (11 Playwright tests, Rust tests, Clippy, and build). Established
+  sockets are not revalidated after logout, revocation, or deactivation. Integration
+  and required hosted CI remain pending; see [WebSocket security](docs/websocket-security.md).
+- [x] Persisted projection-event origin validation (2026-10-24): exact bounded event
+  lookup, full-envelope comparison, and fail-closed no-mutation behavior passed
+  focused HTTP coverage and the broad pre-commit checks at `596cc81`. Integration
+  and required hosted CI remain pending; see [coverage](docs/security-test-coverage.md)
+  and [event-handler delivery](docs/event-handlers.md#projection-delivery).
 
 ### Phase 3 — Plugin and hook system
 

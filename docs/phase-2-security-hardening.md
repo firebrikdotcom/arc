@@ -5,15 +5,12 @@ the canonical project status and roadmap.
 
 ## Scope
 
-Phase 2 has two unchecked roadmap bullets and three remaining deliverables:
+The WebSocket and projection-origin controls have passed focused local verification
+on their feature branches. Integration and required hosted CI remain pending, and the
+deployment audit policy still awaits owner decisions. Phase 2 is not complete.
 
-1. Authorize WebSocket handshakes and room delivery.
-2. Verify persisted event origin before internal projection delivery.
-3. Approve and verify the deployment audit policy for the named application and
-   deployment.
-
-The first two are framework implementation work. The deployment audit policy is
-an organization/operator decision and cannot be completed by selecting generic
+The deployment audit policy for the named application and deployment is the
+remaining organizational decision. It cannot be completed by selecting generic
 legal defaults.
 
 ## Delivery and PR order
@@ -23,11 +20,12 @@ current `origin/master` (`9a25bf5`). The eventual milestone PR targets `master`.
 
 | Order | PR | Target | Completion condition |
 | --- | --- | --- | --- |
-| 1 | WebSocket connection and room authorization | `feature/phase2-security-hardening` | Authenticated, origin-checked connections; denied room joins create no membership; cross-user delivery tests pass. |
-| 2 | Persisted projection-event origin validation | `feature/phase2-security-hardening` | Only an exact event found in the authoritative typed store is projected; forged, absent, or modified events cause no mutation. |
-| 3 | Security documentation reconciliation | `feature/phase2-security-hardening` | Technical writer updates the threat model, coverage matrix, release checklist, relevant operations guide, and canonical roadmap from verified behavior. |
-| 4 | Deployment audit policy record | `feature/phase2-security-hardening` | Named owner approves disclosure inventory, identifiers, retention/legal holds, sink access/encryption, archive, backup restore and erasure; deployment evidence is recorded. |
-| 5 | Phase 2 milestone PR | `master` | Combined verification, independent review, required CI/Security checks pass on the final pushed head, and the approved deployment-policy record is present before milestone closure. A draft PR may open earlier while policy remains pending. |
+| 1 | Repair dependency security gates | `feature/phase2-security-hardening` | Repair root causes behind compatible Rust/npm dependency advisories and verify the dependency-review setting. Keep all checks enabled and audit strength unchanged; no skipped checks or weakened audit. Required CI is green. |
+| 2 | WebSocket connection and room authorization | `feature/phase2-security-hardening` | Locally verified: 11 Playwright tests, Rust tests, Clippy, and build pass. Handshake identity and origin are checked; the default room policy prevents cross-user joins. Established-socket revocation remains open; integration and hosted CI are pending. |
+| 3 | Persisted projection-event origin validation | `feature/phase2-security-hardening` | Locally verified at `596cc81`: exact authoritative event lookup and complete envelope comparison; absent/modified events fail without mutation. Focused HTTP tests and broad pre-commit checks pass; integration and hosted CI are pending. |
+| 4 | Security documentation reconciliation | `feature/phase2-security-hardening` | Technical writer updates the threat model, coverage matrix, release checklist, relevant operations guide, and canonical roadmap from verified behavior. |
+| 5 | Deployment audit policy record | `feature/phase2-security-hardening` | Named owner approves disclosure inventory, identifiers, retention/legal holds, sink access/encryption, archive, backup restore and erasure; deployment evidence is recorded. |
+| 6 | Phase 2 milestone PR | `master` | Combined verification, independent review, and required CI/Security checks pass on the final pushed head, and the approved deployment-policy record is present before milestone closure. The milestone is not ready until CI is green. A draft PR may open earlier while policy remains pending. |
 
 Feature PRs include their focused tests and documentation changes. If both
 features touch shared security coverage, the second PR rebases on the first
@@ -82,7 +80,9 @@ identifier scope, disclosure inventory, legal-hold precedence, access roles, or
 backup/erasure policy on the owner's behalf. Completion requires a named
 application/deployment, accountable owner, approved policy, and evidence for the
 actual sink, route, access/encryption, retention, archival, restore and erasure
-behavior. Until then, Phase 2 is not fully closed.
+behavior. The [conversation plan](deployment-audit-policy-plan.md) records the
+ordered owner decisions and candidate evidence checks; it does not approve
+policy. Until then, Phase 2 is not fully closed.
 
 ## Verification gates
 
