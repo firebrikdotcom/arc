@@ -11,12 +11,16 @@ until verified. This document records required work; it does not approve a relea
   acceptance with rationale and reviewer. Mark a surface not applicable only with proof it is disabled.
 - [ ] Resolve TM-03 before claiming strict JWT revocation: missing `jti`, missing store, invalid,
   expired, unknown and revoked tokens must reject without handler side effects; store outage must
-  reject. Current source does not meet the missing-`jti`/missing-store conditions.
+  reject. The current HTTP contract covers missing-`jti` and missing-store denial; verify the
+  candidate's actual route/store wiring and record the result.
 - [ ] Decide object/tenant authorization and stale-cookie behavior (TM-01/04/10). Test two users
   against each other's IDs for list/get/create/update/delete and role changes.
-- [ ] Restrict the projection endpoint and broker credentials (TM-07/09); document how forged
-  events are prevented. Do not equate a correct envelope with a persisted, authentic event.
-- [ ] Disable sensitive WebSocket delivery until anonymous/cross-user room tests pass (TM-11).
+- [ ] Restrict the projection endpoint and broker credentials (TM-07/09). Confirm deployment
+  wiring uses authoritative exact-event validation; the framework rejects absent or modified
+  envelopes without projection mutation, but token and broker access remain deployment controls.
+- [ ] Verify the deployed WebSocket origin allowlist and session principal provider (TM-11); test
+  own-user room membership and cross-user isolation. Assess the open risk that revoking or
+  disabling an identity does not close an already-upgraded socket.
 - [ ] If retained access evidence is required, replace and test the no-op logger (TM-13).
 
 ## Authentication and browser evidence
@@ -68,7 +72,7 @@ Do not start the shared reference stack or reuse another lane's volumes/ports.
 | Formatting and static analysis | `make format-check`; `make lint` | Formatting and all-target/all-feature Clippy pass |
 | Backend regression | `make test` | Workspace/all-feature tests pass; count service-dependent skips explicitly |
 | Focused core security contracts | `cargo test --locked -p arc-core` | Integrity, audit, command and projection tests pass; not a substitute for HTTP tests |
-| Projection boundary | `cargo test -p arc --all-features internal_projection_controller` | Auth rejection and Arc-owned projection tests pass |
+| Projection boundary | `cargo test --locked -p arc --test projection_security_http` | Missing/wrong auth, absent and modified-event rejection without mutation, valid persisted delivery, and idempotent duplicate delivery pass |
 | Distributed routing | `cargo test -p arc --all-features --test benthos_projection_routing -- --nocapture` | Real NATS/Benthos path exercised; prerequisite skips are not passes |
 | Manifest contracts | `npm run benthos:config:test`; `make benthos-config-check` | Generator tests and freshness pass |
 | Pipeline syntax | `make benthos-lint` | Installed pinned tool passes; avoid the target's anonymous Docker fallback, use a scoped Compose service instead |

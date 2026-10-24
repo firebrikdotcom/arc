@@ -11,10 +11,10 @@ weakness; it does not certify a mitigation or approve a release.
 | TM-04 object access | `crates/arc-app/src/http/controllers/profile_security_test.rs` | Real profile handler through JWT: caller cannot select another user's profile or obtain password fields. This covers the profile endpoint, not all application resources or tenants. |
 | TM-01/04 browser identities | `tests/security/browser.spec.mjs` | Chromium with real session/RBAC middleware and SQLite identities: fresh JWT roles reject role removal/disable; browser handles are revoked even after role/account restoration. Saved logout and idle-expiry cookies cannot replay; independent sessions remain valid; store outages deny access and recover. |
 | TM-01/04 store and middleware | `arc-auth-db::browser_tests::migration_upgrade_and_durable_invalidation`; `arc-auth-session::tests::cached_identity_cannot_authorize_without_a_validated_handle` | SQLite upgrade/idempotence, persisted handles across store instances, role/active/password invalidation, logout isolation and expiry; cached-only cookies and missing store wiring deny access. |
-| TM-07 projection | `crates/arc-app/tests/projection_security_http.rs` | Real TCP: absent/wrong credentials reject without projection mutation; duplicate event leaves the same row; valid bearer can inject an event absent from the event store (GAP). |
+| TM-07 projection | `crates/arc-app/tests/projection_security_http.rs`; `ProjectionEngine::process_external_delivery` | Real HTTP rejects missing/wrong credentials without mutation. Delivery now requires the exact event from bounded typed lookup in the authoritative store; absent or modified envelopes are rejected before projection. Tests cover a forged aggregate ID, payload, timestamp, and audit metadata with no mutation, then a valid persisted event and idempotent duplicate delivery. Stores without exact lookup support fail closed. |
 | TM-08 delivery | `arc-core::command_bus::tests::publish_failure_preserves_event_for_explicit_recovery` | Unit fault injection proves append survives publish failure and explicit replay preserves event ID without another append. It is not automatic outbox recovery or crash durability. |
 | TM-08/09 distributed routing | `crates/arc-app/tests/benthos_projection_routing.rs` | Existing real NATS → Redpanda Connect → Arc projection test passed with actual binaries, without prerequisite skips. Broker crash/restart recovery remains untested by this check. |
-| TM-11 WebSockets | `tests/security/browser.spec.mjs` | Real Chromium WebSockets/Arc actors: user-targeted broadcasts isolate identities, but anonymous private-room subscriptions and cross-user room delivery succeed (GAP). |
+| TM-11 WebSockets | `tests/security/browser.spec.mjs` | The current browser suite checks handshake origin and authenticated identity, rejects cached-only identity, verifies own-user room membership, and confirms user/room broadcasts stay isolated. The authorization tests assert the secure behavior directly; they are not expected-failure probes. Revocation after a socket has already upgraded remains a known limitation. See [WebSocket security](websocket-security.md). |
 | TM-13 access audit | `crates/arc-web/tests/security_http.rs::audit_http_failures_and_stalled_sink_gap` | Real TCP with controlled sink: PHI/PCI errors return 503 without payload; PII fails open; stalled PHI request stays pending until released. The 100ms observation is not a production timeout policy. |
 | TM-13 durability | SQLite sink unit tests, `durable_access_http`, `tests/durable-audit/` browser fixture | Dedicated commit persistence, reopen, lock/disk PHI rejection, overload and bounded retention hook. Browser process-restart receipts are verified separately. Deployment backup restore, disclosure inventory and retention policies remain open. |
 
@@ -34,10 +34,17 @@ provide `nats-server`, `node` and `redpanda-connect` inside your Compose verifie
 Inspect output: the existing test can skip when tools are missing. This review used
 NATS 2.14.1 and the Redpanda Connect container binary and observed actual delivery.
 
-## Explicit desired-security assertions
+## Historical gap probes (2026-09-14)
 
-These are separate, intentionally failing probes for unresolved controls. With the
-fixture running, run:
+At the time of the 2026-09-14 v0.8.8 integration, these were separate,
+intentionally failing probes for controls that had not yet been implemented.
+The dated results below are retained as historical evidence; they do not
+describe the current WebSocket assertions. The current browser suite exercises
+the implemented handshake and room controls as normal passing criteria. TM-07
+projection-origin validation is separately implemented and covered by the HTTP
+tests recorded in the current matrix.
+The commands run for that historical probe (retained for context, not as current
+test instructions) were:
 
 ```sh
 ARC_SECURITY_CONTRACTS=1 npx playwright test --config tests/security/browser.config.mjs
@@ -49,11 +56,11 @@ Inside the verifier run:
 ARC_SECURITY_CONTRACTS=1 cargo test --locked -p arc --test projection_security_http
 ```
 
-Observed: five browser failures (cached role, disabled identity, saved logout cookie,
-anonymous socket, cross-user room) and one forged-projection failure. Normal mode
-passes by explicitly asserting and naming the current gaps. No tests silently skip
-these risks. Security-policy decisions and implementations remain required before
-these desired assertions can become release gates.
+Observed then: five browser failures (cached role, disabled identity, saved logout
+cookie, anonymous socket, cross-user room) and one forged-projection failure.
+The socket failures were later replaced by passing positive handshake and room
+authorization checks. This historical run must not be used to describe the current
+WebSocket behavior or to infer that other gaps were fixed.
 
 ## Verification evidence and scope
 
@@ -121,9 +128,9 @@ server and Redpanda Connect, Chromium).
   admin navigation suite.
 - Durable-audit harness: both real Chromium phases, proving a committed receipt
   survives replacement of the serving process.
-- Threat-model Chromium suite: 11 passed. Nine are positive browser/real-TCP
-  session checks; the remaining two remain **characterizations of open WebSocket
-  gaps** and assert the current, unfixed behavior.
+- Threat-model Chromium suite: 11 passed at that revision. Nine are positive
+  browser/real-TCP session checks; the remaining two were **characterizations of
+  open WebSocket gaps at that time** and asserted then-current behavior.
 - Dependency audit: exit 0 against the pre-existing workflow exceptions only.
 
 `tests/durable-audit/run-browser.sh` and `tests/security/run.sh` are now required
@@ -138,16 +145,41 @@ CSRF token from a page fetched *after* signing in and must persist the updated
 session cookie from that response; `scripts/check-arc-scaffold.sh` was corrected
 to do so.
 
-This is local integration evidence plus the CI gates it installs. It does not claim
-package publication, nor resolution of the room-authorization, projection-origin or
-deployment disclosure/retention items, which remain open.
+At that revision, this was local integration evidence plus the CI gates it installed;
+it did not claim package publication or resolution of the then-open room-authorization,
+projection-origin, or deployment disclosure/retention items. The later WebSocket
+status is recorded below; the other items are not changed by that update.
+
+## WebSocket authorization update (2026-10-24)
+
+The current WebSocket feature adds handshake authentication and origin checks, a
+default own-user room policy, and browser coverage for identity isolation and
+denied room joins. See [WebSocket security](websocket-security.md) and the
+[threat-model mitigation update](threat-model.md#websocket-authorization-mitigation-update-2026-10-24).
+Authorization is checked at handshake; an already-upgraded socket is not
+revalidated or closed when its identity is revoked or disabled. Treat that as an
+open residual risk. The WebSocket harness passed 11 Playwright tests, Rust tests,
+Clippy, and build checks locally; this does not claim deployment readiness or
+replace required hosted CI.
+
+## Projection-origin validation update (2026-10-24)
+
+The internal projection endpoint now requires an exact event returned by bounded
+typed lookup in the authoritative event store, compares the complete envelope,
+and projects the stored event. Missing, forged, modified, and unsupported lookup
+cases fail closed without read-model mutation. The focused real-HTTP test also
+checks valid persisted delivery and idempotent duplicates. See the [projection
+boundary implementation](event-handlers.md#projection-delivery) and the current
+TM-07 row above. Local verification passed at commit `596cc81`; required hosted
+CI and final integration remain separate gates.
 
 ## Bounded collection follow-up (2026-09-14)
 
 Storage and generated collection regression coverage is documented in
 [bounded collections](bounded-collections.md). Other known-gap characterization
-checks remain unchanged; collection hardening does not resolve session, socket,
-audit, or projection-origin gaps.
+checks remained unchanged at that time; collection hardening did not resolve
+session, socket, audit, or projection-origin gaps then. Later WebSocket and
+projection-origin status is recorded above.
 
 ## Dependency security gate (2026-09-14)
 
