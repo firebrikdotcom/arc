@@ -609,6 +609,64 @@ impl EventStore for PostgresEventStore {
         self.load_stream_from(aggregate_type, aggregate_id, 1).await
     }
 
+    async fn load_event(
+        &self,
+        aggregate_type: &str,
+        aggregate_id: &str,
+        sequence: i64,
+    ) -> EventStoreResult<Option<Event>> {
+        // The target event and the predecessor signature must come from one
+        // database snapshot so integrity verification cannot mix revisions.
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| EventStoreError::database(e.to_string()))?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| EventStoreError::database(e.to_string()))?;
+
+        let row = sqlx::query(
+            "SELECT * FROM events
+             WHERE aggregate_type = $1 AND aggregate_id = $2 AND sequence = $3",
+        )
+        .bind(aggregate_type)
+        .bind(aggregate_id)
+        .bind(sequence)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| EventStoreError::database(e.to_string()))?;
+
+        let event = match row {
+            Some(row) => {
+                let event_row = EventRow::from_pg_row(&row)?;
+                match self.integrity.as_ref() {
+                    Some(integrity) => {
+                        let previous = self
+                            .previous_signature_for_aggregate(
+                                &mut tx,
+                                Some(aggregate_type),
+                                aggregate_id,
+                                sequence,
+                            )
+                            .await?;
+                        self.verify_integrity_rows(integrity, &[event_row], previous)
+                            .await?
+                            .pop()
+                    }
+                    None => Some(event_row.to_event()?),
+                }
+            }
+            None => None,
+        };
+
+        tx.commit()
+            .await
+            .map_err(|e| EventStoreError::database(e.to_string()))?;
+        Ok(event)
+    }
+
     async fn load_from(
         &self,
         aggregate_id: &str,
@@ -933,6 +991,74 @@ mod tests {
 
     #[tokio::test]
     #[serial_test::serial]
+    async fn test_live_load_event_uses_exact_stream_identity() {
+        let Some(store) = setup_test_store().await else {
+            return;
+        };
+        let event = stamped_event("User", "shared-id", 1, "UserCreated", json!({"v": 1}));
+        store
+            .append_to("User", "shared-id", VersionCheck::New, vec![event.clone()])
+            .await
+            .unwrap();
+        store
+            .append_to(
+                "Product",
+                "shared-id",
+                VersionCheck::New,
+                vec![stamped_event(
+                    "Product",
+                    "shared-id",
+                    1,
+                    "ProductCreated",
+                    json!({}),
+                )],
+            )
+            .await
+            .unwrap();
+
+        let loaded = store.load_event("User", "shared-id", 1).await.unwrap();
+        assert_eq!(
+            loaded.as_ref().map(|loaded| loaded.event_id),
+            Some(event.event_id)
+        );
+        assert!(store
+            .load_event("Order", "shared-id", 1)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(store
+            .load_event("User", "shared-id", 2)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_live_load_event_verifies_integrity_signature() {
+        let Some(store) = setup_integrity_test_store().await else {
+            return;
+        };
+        let mut first = stamped_event("User", "integrity-user", 1, "UserCreated", json!({"v": 1}));
+        first.timestamp = 1_700_000_000_000;
+        let mut second = stamped_event("User", "integrity-user", 2, "UserUpdated", json!({"v": 2}));
+        second.timestamp = 1_700_000_001_000;
+        store
+            .append_to(
+                "User",
+                "integrity-user",
+                VersionCheck::New,
+                vec![first, second.clone()],
+            )
+            .await
+            .unwrap();
+
+        let loaded = store.load_event("User", "integrity-user", 2).await.unwrap();
+        assert_eq!(loaded, Some(second));
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
     async fn test_live_same_id_is_isolated_by_aggregate_type() {
         let Some(store) = setup_test_store().await else {
             return;
@@ -1042,6 +1168,10 @@ mod tests {
 
         let err = store.load("tamper-1").await.unwrap_err();
         assert!(matches!(err, EventStoreError::Integrity { .. }));
+        assert!(matches!(
+            store.load_event("User", "tamper-1", 1).await,
+            Err(EventStoreError::Integrity { .. })
+        ));
     }
 
     #[tokio::test]

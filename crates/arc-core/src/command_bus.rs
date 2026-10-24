@@ -9,7 +9,8 @@
 //! 3. Handle command through `Aggregate::handle()` to produce new events
 //!    (events leave `handle()` with `audit = AuditMetadata::pending()`)
 //! 4. **Stamp** each event with a fully-validated [`AuditMetadata`] derived from
-//!    the request-scoped [`CommandContext`]
+//!    the request-scoped [`CommandContext`] and canonicalize the millisecond
+//!    event timestamp to the whole-second precision persisted by event stores
 //! 5. Append events to `EventStore` with optimistic concurrency check; the
 //!    store re-validates audit (defense-in-depth)
 //! 6. Publish events to `EventBus` for projections and side effects
@@ -309,7 +310,9 @@ impl<A: Aggregate> CommandBus<A> {
             return Ok(vec![]);
         }
 
-        // Step 4: Stamp audit (one validated stamp shared across all produced events)
+        // Step 4: Stamp audit and align event timestamps with persisted
+        // whole-second precision. The resulting vector is shared by append,
+        // publish, snapshot application, and the returned dispatch result.
         let audit = context
             .to_audit()
             .map_err(|source| CommandBusError::InvalidAudit {
@@ -318,7 +321,10 @@ impl<A: Aggregate> CommandBus<A> {
             })?;
         let new_events: Vec<Event> = new_events
             .into_iter()
-            .map(|e| e.with_audit(audit.clone()))
+            .map(|mut event| {
+                event.timestamp = (event.timestamp / 1_000) * 1_000;
+                event.with_audit(audit.clone())
+            })
             .collect();
 
         // Step 5: Append (store re-validates audit defense-in-depth)
@@ -451,13 +457,15 @@ mod tests {
             if command.increment < 0 {
                 return Err(CounterError::NegativeIncrement);
             }
-            Ok(vec![Event::new(NewEvent {
+            let mut event = Event::new(NewEvent {
                 aggregate_type: "Counter",
                 aggregate_id: &command.id,
                 sequence: self.version + 1,
                 event_type: "CounterIncremented",
                 payload: json!({ "increment": command.increment }),
-            })])
+            });
+            event.timestamp = 1_700_000_000_123;
+            Ok(vec![event])
         }
 
         fn apply(&mut self, event: &Event) {
@@ -534,7 +542,8 @@ mod tests {
             .await
             .unwrap();
         healthy.publish(events.clone()).await.unwrap();
-        assert_eq!(recovered.lock().await[0].event_id, events[0].event_id);
+        assert_eq!(recovered.lock().await[0], events[0]);
+        assert_eq!(events[0].timestamp % 1_000, 0);
         assert_eq!(store.load("recover").await.unwrap().len(), 1);
     }
 
@@ -622,7 +631,7 @@ mod tests {
         let captured = published.clone();
 
         struct H {
-            captured: Arc<TokioMutex<Vec<String>>>,
+            captured: Arc<TokioMutex<Vec<Event>>>,
         }
         #[async_trait]
         impl EventHandler for H {
@@ -633,26 +642,29 @@ mod tests {
                 &self,
                 event: &Event,
             ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-                self.captured.lock().await.push(event.event_type.clone());
+                self.captured.lock().await.push(event.clone());
                 Ok(())
             }
         }
         event_bus.subscribe(Box::new(H { captured })).await.unwrap();
 
-        let bus = CommandBus::<CounterAggregate>::new(
-            Box::new(InMemoryEventStore::new()),
-            Box::new(event_bus),
-        );
-        bus.dispatch(
-            CounterCommand {
-                id: "c1".into(),
-                increment: 5,
-            },
-            ctx(),
-        )
-        .await
-        .unwrap();
-        assert_eq!(published.lock().await.len(), 1);
+        let store = InMemoryEventStore::new();
+        let bus = CommandBus::<CounterAggregate>::new(Box::new(store.clone()), Box::new(event_bus));
+        let returned = bus
+            .dispatch(
+                CounterCommand {
+                    id: "c1".into(),
+                    increment: 5,
+                },
+                ctx(),
+            )
+            .await
+            .unwrap();
+        let delivered = published.lock().await.clone();
+        let persisted = store.load_event("Counter", "c1", 1).await.unwrap();
+        assert_eq!(delivered, returned);
+        assert_eq!(persisted, returned.first().cloned());
+        assert_eq!(returned[0].timestamp, 1_700_000_000_000);
     }
 
     #[tokio::test]
