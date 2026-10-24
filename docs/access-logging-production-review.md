@@ -90,6 +90,9 @@ geographic storage, erasure/legal-hold conflicts, and treatment of backups must 
 decided by the organization. This review sets no retention period and makes no
 compliance claim. Apply approved policies consistently to primary storage, replicas,
 archives, incident exports and backups; test their enforcement before relying on it.
+The [deployment audit policy conversation plan](deployment-audit-policy-plan.md)
+organizes the outstanding owner decisions and synthetic evidence checks; it does
+not approve a policy or deployment configuration.
 
 ## Verification scope
 

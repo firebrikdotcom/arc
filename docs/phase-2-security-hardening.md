@@ -82,7 +82,9 @@ identifier scope, disclosure inventory, legal-hold precedence, access roles, or
 backup/erasure policy on the owner's behalf. Completion requires a named
 application/deployment, accountable owner, approved policy, and evidence for the
 actual sink, route, access/encryption, retention, archival, restore and erasure
-behavior. Until then, Phase 2 is not fully closed.
+behavior. The [conversation plan](deployment-audit-policy-plan.md) records the
+ordered owner decisions and candidate evidence checks; it does not approve
+policy. Until then, Phase 2 is not fully closed.
 
 ## Verification gates
 
