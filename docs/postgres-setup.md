@@ -40,11 +40,17 @@ strict comparison of a delivered event with its persisted authoritative event.
 This change applies only to the event log's payload column. Projection
 read-model documents remain `JSONB`.
 
-Existing schemas are upgraded with an idempotent forward migration. On
-2026-10-24, the focused PostgreSQL 16 suite passed 26/26 tests, covering
-integrity disabled/enabled, JSON numeric round-trips, a signed legacy JSONB
-upgrade, migration idempotency, tamper rejection without projection mutation,
-and numeric command → publish → external projection. The broader
+Existing schemas are upgraded with an idempotent forward migration. Its guard
+resolves the `events` table through the active `search_path` and changes the
+payload column only when it is `JSONB`. If the target column is already `JSON`,
+the guard skips the `ALTER TABLE`, avoiding an unnecessary exclusive lock; this
+does not imply that the full schema initializer is lock-free. On 2026-10-24, the
+focused PostgreSQL 16 suite passed 28/28 tests, covering integrity
+disabled/enabled, JSON numeric round-trips, a signed legacy JSONB upgrade,
+migration idempotency, tamper rejection without projection mutation, and numeric
+command → publish → external projection. The suite also uses two schemas and an
+`ACCESS SHARE` lock with a 250 ms lock timeout to verify search-path targeting
+and that an already-JSON payload avoids redundant DDL. The broader
 `bash tests/bounded-reads/run.sh` harness exited 0 with PostgreSQL-enabled Rust
 tests, a generated fixture (5/5), and the browser workflow. These are local test
 results; they do not establish that the migration has been applied to any
