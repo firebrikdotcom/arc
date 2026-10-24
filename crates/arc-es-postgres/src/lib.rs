@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS events (
     aggregate_id TEXT NOT NULL,
     sequence BIGINT NOT NULL,
     event_type TEXT NOT NULL,
-    payload JSONB NOT NULL,
+    payload JSON NOT NULL,
     "timestamp" BIGINT NOT NULL,
     actor_id TEXT NOT NULL DEFAULT 'legacy-pre-hipaa',
     actor_session_id TEXT,
@@ -67,6 +67,11 @@ CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events("timestamp");
 CREATE INDEX IF NOT EXISTS idx_events_actor_id ON events(actor_id);
 CREATE INDEX IF NOT EXISTS idx_events_correlation_id ON events(correlation_id);
 "#;
+
+/// Forward migration for databases created before event payloads retained JSON
+/// text. The type check makes this safe to run on both fresh and upgraded DBs.
+const EVENTS_PAYLOAD_JSON_MIGRATION: &str =
+    include_str!("../migrations/20261024_000001_event_payload_json.sql");
 
 /// DDL for the snapshot table. Idempotent.
 const SNAPSHOTS_SCHEMA: &str = r#"
@@ -191,7 +196,8 @@ impl EventRow {
             aggregate_id: row.try_get("aggregate_id").map_err(map)?,
             sequence: row.try_get("sequence").map_err(map)?,
             event_type: row.try_get("event_type").map_err(map)?,
-            payload: row.try_get("payload").map_err(map)?,
+            payload: serde_json::from_str(&row.try_get::<String, _>("payload_text").map_err(map)?)
+                .map_err(|e| EventStoreError::serialization(e.to_string()))?,
             timestamp: row.try_get("timestamp").map_err(map)?,
             actor_id: row.try_get("actor_id").map_err(map)?,
             actor_session_id: row.try_get("actor_session_id").map_err(map)?,
@@ -289,6 +295,10 @@ impl PostgresEventStore {
             .execute(&self.pool)
             .await
             .map_err(|e| EventStoreError::database(e.to_string()))?;
+        sqlx::raw_sql(EVENTS_PAYLOAD_JSON_MIGRATION)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| EventStoreError::database(e.to_string()))?;
         sqlx::raw_sql(SNAPSHOTS_SCHEMA)
             .execute(&self.pool)
             .await
@@ -332,7 +342,7 @@ impl PostgresEventStore {
         }
 
         let row = sqlx::query(
-            "SELECT * FROM events
+            "SELECT *, payload::text AS payload_text FROM events
              WHERE ($1::text IS NULL OR aggregate_type = $1)
                AND aggregate_id = $2 AND sequence < $3
              ORDER BY sequence DESC LIMIT 1",
@@ -439,7 +449,7 @@ impl PostgresEventStore {
         }
 
         let row = sqlx::query(
-            "SELECT * FROM events
+            "SELECT *, payload::text AS payload_text FROM events
              WHERE ($1::text IS NULL OR aggregate_type = $1)
                AND aggregate_id = $2 AND sequence < $3
              ORDER BY sequence DESC LIMIT 1",
@@ -568,14 +578,16 @@ impl EventStore for PostgresEventStore {
                      "timestamp", actor_id, actor_session_id, source_ip, user_agent,
                      timestamp_utc_us, causation_id, correlation_id,
                      integrity_signature, integrity_key_id)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)"#,
+                   VALUES ($1, $2, $3, $4, $5, $6::text::json, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)"#,
             )
             .bind(&row.event_id)
             .bind(&row.aggregate_type)
             .bind(&row.aggregate_id)
             .bind(row.sequence)
             .bind(&row.event_type)
-            .bind(&row.payload)
+            .bind(serde_json::to_string(&row.payload).map_err(|e| {
+                EventStoreError::serialization(format!("Failed to serialize event payload: {e}"))
+            })?)
             .bind(row.timestamp)
             .bind(&row.actor_id)
             .bind(&row.actor_session_id)
@@ -609,13 +621,71 @@ impl EventStore for PostgresEventStore {
         self.load_stream_from(aggregate_type, aggregate_id, 1).await
     }
 
+    async fn load_event(
+        &self,
+        aggregate_type: &str,
+        aggregate_id: &str,
+        sequence: i64,
+    ) -> EventStoreResult<Option<Event>> {
+        // The target event and the predecessor signature must come from one
+        // database snapshot so integrity verification cannot mix revisions.
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| EventStoreError::database(e.to_string()))?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| EventStoreError::database(e.to_string()))?;
+
+        let row = sqlx::query(
+            "SELECT *, payload::text AS payload_text FROM events
+             WHERE aggregate_type = $1 AND aggregate_id = $2 AND sequence = $3",
+        )
+        .bind(aggregate_type)
+        .bind(aggregate_id)
+        .bind(sequence)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| EventStoreError::database(e.to_string()))?;
+
+        let event = match row {
+            Some(row) => {
+                let event_row = EventRow::from_pg_row(&row)?;
+                match self.integrity.as_ref() {
+                    Some(integrity) => {
+                        let previous = self
+                            .previous_signature_for_aggregate(
+                                &mut tx,
+                                Some(aggregate_type),
+                                aggregate_id,
+                                sequence,
+                            )
+                            .await?;
+                        self.verify_integrity_rows(integrity, &[event_row], previous)
+                            .await?
+                            .pop()
+                    }
+                    None => Some(event_row.to_event()?),
+                }
+            }
+            None => None,
+        };
+
+        tx.commit()
+            .await
+            .map_err(|e| EventStoreError::database(e.to_string()))?;
+        Ok(event)
+    }
+
     async fn load_from(
         &self,
         aggregate_id: &str,
         from_sequence: i64,
     ) -> EventStoreResult<Vec<Event>> {
         let rows = sqlx::query(
-            "SELECT * FROM events WHERE aggregate_id = $1 AND sequence >= $2 ORDER BY sequence ASC",
+            "SELECT *, payload::text AS payload_text FROM events WHERE aggregate_id = $1 AND sequence >= $2 ORDER BY sequence ASC",
         )
         .bind(aggregate_id)
         .bind(from_sequence)
@@ -655,7 +725,7 @@ impl EventStore for PostgresEventStore {
         from_sequence: i64,
     ) -> EventStoreResult<Vec<Event>> {
         let rows = sqlx::query(
-            "SELECT * FROM events
+            "SELECT *, payload::text AS payload_text FROM events
              WHERE aggregate_type = $1 AND aggregate_id = $2 AND sequence >= $3
              ORDER BY sequence ASC",
         )
@@ -697,11 +767,13 @@ impl EventStore for PostgresEventStore {
     }
 
     async fn stream_all(&self, from_position: i64) -> EventStoreResult<Vec<Event>> {
-        let rows = sqlx::query("SELECT * FROM events WHERE id >= $1 ORDER BY id ASC")
-            .bind(from_position)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| EventStoreError::database(e.to_string()))?;
+        let rows = sqlx::query(
+            "SELECT *, payload::text AS payload_text FROM events WHERE id >= $1 ORDER BY id ASC",
+        )
+        .bind(from_position)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| EventStoreError::database(e.to_string()))?;
 
         let event_rows: Vec<EventRow> = rows
             .iter()
@@ -853,9 +925,16 @@ impl EventStore for PostgresEventStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arc_core::aggregate::{Aggregate, Command};
     use arc_core::audit::AuditMetadata;
+    use arc_core::command_bus::{CommandBus, CommandContext};
+    use arc_core::event_bus::{EventBus, EventHandler, InProcessEventBus};
+    use arc_core::projection::{Projection, ProjectionEngine, ProjectionResult};
     use serde_json::json;
+    use sqlx::postgres::PgConnectOptions;
     use std::env;
+    use std::str::FromStr;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     async fn setup_test_store() -> Option<PostgresEventStore> {
         let url = env::var("ARC_POSTGRES_TEST_DATABASE_URL").ok()?;
@@ -915,6 +994,96 @@ mod tests {
         .with_audit(AuditMetadata::test_default())
     }
 
+    #[derive(Debug)]
+    struct NumericCommand {
+        aggregate_id: String,
+        payload: serde_json::Value,
+    }
+
+    impl Command for NumericCommand {
+        fn aggregate_id(&self) -> &str {
+            &self.aggregate_id
+        }
+    }
+
+    #[derive(Default)]
+    struct NumericAggregate {
+        version: i64,
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("numeric aggregate error")]
+    struct NumericAggregateError;
+
+    #[async_trait]
+    impl Aggregate for NumericAggregate {
+        type Command = NumericCommand;
+        type Event = ();
+        type Error = NumericAggregateError;
+
+        fn aggregate_type() -> &'static str {
+            "Numeric"
+        }
+
+        fn version(&self) -> i64 {
+            self.version
+        }
+
+        async fn handle(&self, command: Self::Command) -> Result<Vec<Event>, Self::Error> {
+            Ok(vec![Event::new(NewEvent {
+                aggregate_type: "Numeric",
+                aggregate_id: &command.aggregate_id,
+                sequence: self.version + 1,
+                event_type: "NumericCommanded",
+                payload: command.payload,
+            })])
+        }
+
+        fn apply(&mut self, event: &Event) {
+            self.version = event.sequence;
+        }
+    }
+
+    struct ApplyCounter(Arc<AtomicUsize>);
+
+    #[async_trait]
+    impl Projection for ApplyCounter {
+        fn name(&self) -> &str {
+            "numeric-apply-counter"
+        }
+
+        fn handles(&self) -> Vec<String> {
+            vec!["NumericCommanded".to_string()]
+        }
+
+        async fn handle(&self, _event: &Event) -> ProjectionResult<()> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        async fn clear(&self) -> ProjectionResult<()> {
+            self.0.store(0, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    struct ExternalProjectionHandler(Arc<ProjectionEngine>);
+
+    #[async_trait]
+    impl EventHandler for ExternalProjectionHandler {
+        fn handles(&self) -> Vec<String> {
+            vec!["NumericCommanded".to_string()]
+        }
+
+        async fn handle(
+            &self,
+            event: &Event,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+            self.0.process_external_delivery(event).await?;
+            Ok(())
+        }
+    }
+
     #[tokio::test]
     #[serial_test::serial]
     async fn test_live_append_and_load() {
@@ -929,6 +1098,488 @@ mod tests {
         let loaded = store.load("u1").await.unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].sequence, 1);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_live_load_event_uses_exact_stream_identity() {
+        let Some(store) = setup_test_store().await else {
+            return;
+        };
+        let event = stamped_event("User", "shared-id", 1, "UserCreated", json!({"v": 1}));
+        store
+            .append_to("User", "shared-id", VersionCheck::New, vec![event.clone()])
+            .await
+            .unwrap();
+        store
+            .append_to(
+                "Product",
+                "shared-id",
+                VersionCheck::New,
+                vec![stamped_event(
+                    "Product",
+                    "shared-id",
+                    1,
+                    "ProductCreated",
+                    json!({}),
+                )],
+            )
+            .await
+            .unwrap();
+
+        let loaded = store.load_event("User", "shared-id", 1).await.unwrap();
+        assert_eq!(
+            loaded.as_ref().map(|loaded| loaded.event_id),
+            Some(event.event_id)
+        );
+        assert!(store
+            .load_event("Order", "shared-id", 1)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(store
+            .load_event("User", "shared-id", 2)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_live_load_event_verifies_integrity_signature() {
+        let Some(store) = setup_integrity_test_store().await else {
+            return;
+        };
+        let mut first = stamped_event("User", "integrity-user", 1, "UserCreated", json!({"v": 1}));
+        first.timestamp = 1_700_000_000_000;
+        let mut second = stamped_event("User", "integrity-user", 2, "UserUpdated", json!({"v": 2}));
+        second.timestamp = 1_700_000_001_000;
+        store
+            .append_to(
+                "User",
+                "integrity-user",
+                VersionCheck::New,
+                vec![first, second.clone()],
+            )
+            .await
+            .unwrap();
+
+        let loaded = store.load_event("User", "integrity-user", 2).await.unwrap();
+        assert_eq!(loaded, Some(second));
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_live_json_payload_round_trips_numeric_forms_without_integrity() {
+        let Some(store) = setup_test_store().await else {
+            return;
+        };
+        let payload: serde_json::Value = serde_json::from_str(
+            r#"{"nested":{"numbers":[1e18,1,1.0,0.125,1e-18,-0.0,-9223372036854775808,18446744073709551615]}}"#,
+        )
+        .unwrap();
+        let mut event = stamped_event("Numeric", "json-precision", 1, "NumericEvent", payload);
+        event.timestamp = 1_700_000_000_000;
+        store
+            .append_to(
+                "Numeric",
+                "json-precision",
+                VersionCheck::New,
+                vec![event.clone()],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store
+                .load_event("Numeric", "json-precision", 1)
+                .await
+                .unwrap(),
+            Some(event)
+        );
+        let payload_type: String = sqlx::query_scalar(
+            "SELECT t.typname FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_type t ON t.oid = a.atttypid WHERE c.relname = 'events' AND a.attname = 'payload' AND NOT a.attisdropped",
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+        assert_eq!(payload_type, "json");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_live_json_payload_round_trips_numeric_forms_with_integrity() {
+        let Some(store) = setup_integrity_test_store().await else {
+            return;
+        };
+        let payload: serde_json::Value = serde_json::from_str(
+            r#"{"nested":{"numbers":[1e18,1,1.0,0.125,1e-18,-0.0,-9223372036854775808,18446744073709551615]}}"#,
+        )
+        .unwrap();
+        let mut event = stamped_event("Numeric", "signed-precision", 1, "NumericEvent", payload);
+        event.timestamp = 1_700_000_000_000;
+        store
+            .append_to(
+                "Numeric",
+                "signed-precision",
+                VersionCheck::New,
+                vec![event.clone()],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store
+                .load_event("Numeric", "signed-precision", 1)
+                .await
+                .unwrap(),
+            Some(event)
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_live_numeric_command_publish_and_external_projection_round_trip() {
+        let Some(store) = setup_test_store().await else {
+            return;
+        };
+        let applied = Arc::new(AtomicUsize::new(0));
+        let mut engine = ProjectionEngine::new(Box::new(store.clone()));
+        engine.register(Box::new(ApplyCounter(applied.clone())));
+        let engine = Arc::new(engine);
+
+        let mut event_bus = InProcessEventBus::new();
+        event_bus
+            .subscribe(Box::new(ExternalProjectionHandler(engine)))
+            .await
+            .unwrap();
+        let command_bus =
+            CommandBus::<NumericAggregate>::new(Box::new(store.clone()), Box::new(event_bus));
+        let payload: serde_json::Value = serde_json::from_str(
+            r#"{"nested":{"numbers":[1e18,1,1.0,0.125,1e-18,-0.0,-9223372036854775808,18446744073709551615]}}"#,
+        )
+        .unwrap();
+        let events = command_bus
+            .dispatch(
+                NumericCommand {
+                    aggregate_id: "numeric-command-publish".into(),
+                    payload: payload.clone(),
+                },
+                CommandContext::for_actor("numeric-test"),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(events[0].payload, payload);
+        assert_eq!(events[0].timestamp % 1_000, 0);
+        assert_eq!(
+            store
+                .load_event("Numeric", "numeric-command-publish", 1)
+                .await
+                .unwrap(),
+            Some(events[0].clone())
+        );
+        assert_eq!(applied.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_live_jsonb_upgrade_preserves_signature_and_migration_is_repeatable() {
+        let Some(store) = setup_integrity_test_store().await else {
+            return;
+        };
+        let mut original = stamped_event(
+            "Upgrade",
+            "signed-jsonb-upgrade",
+            1,
+            "Created",
+            json!({"safe": 7}),
+        );
+        original.timestamp = 1_700_000_000_000;
+        store
+            .append_to(
+                "Upgrade",
+                "signed-jsonb-upgrade",
+                VersionCheck::New,
+                vec![original.clone()],
+            )
+            .await
+            .unwrap();
+        let signature_before: String = sqlx::query_scalar(
+            "SELECT integrity_signature FROM events WHERE aggregate_id = 'signed-jsonb-upgrade'",
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+
+        sqlx::query("ALTER TABLE events ALTER COLUMN payload TYPE JSONB USING payload::jsonb")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        store.initialize_schema().await.unwrap();
+        let signature_after: String = sqlx::query_scalar(
+            "SELECT integrity_signature FROM events WHERE aggregate_id = 'signed-jsonb-upgrade'",
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+        assert_eq!(
+            signature_after, signature_before,
+            "migration must not reseal history"
+        );
+        assert_eq!(
+            store
+                .load_event("Upgrade", "signed-jsonb-upgrade", 1)
+                .await
+                .unwrap(),
+            Some(original)
+        );
+
+        store.initialize_schema().await.unwrap();
+        let mut precise = stamped_event(
+            "Upgrade",
+            "signed-jsonb-upgrade",
+            2,
+            "Updated",
+            serde_json::from_str(r#"{"n":1e18,"f":1.0,"u":18446744073709551615}"#).unwrap(),
+        );
+        precise.timestamp = 1_700_000_001_000;
+        store
+            .append_to(
+                "Upgrade",
+                "signed-jsonb-upgrade",
+                VersionCheck::Expected(1),
+                vec![precise.clone()],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .load_event("Upgrade", "signed-jsonb-upgrade", 2)
+                .await
+                .unwrap(),
+            Some(precise)
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_live_jsonb_normalized_signature_fails_closed_without_resealing() {
+        let Some(store) = setup_integrity_test_store().await else {
+            return;
+        };
+        let mut original = stamped_event(
+            "Upgrade",
+            "normalized-jsonb-signature",
+            1,
+            "NumericCreated",
+            serde_json::from_str(r#"{"value":1e18}"#).unwrap(),
+        );
+        original.timestamp = 1_700_000_000_000;
+        store
+            .append_to(
+                "Upgrade",
+                "normalized-jsonb-signature",
+                VersionCheck::New,
+                vec![original],
+            )
+            .await
+            .unwrap();
+        let signature_before: String = sqlx::query_scalar(
+            "SELECT integrity_signature FROM events WHERE aggregate_id = 'normalized-jsonb-signature'",
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+
+        sqlx::query("ALTER TABLE events ALTER COLUMN payload TYPE JSONB USING payload::jsonb")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        store.initialize_schema().await.unwrap();
+        let signature_after: String = sqlx::query_scalar(
+            "SELECT integrity_signature FROM events WHERE aggregate_id = 'normalized-jsonb-signature'",
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+
+        assert_eq!(
+            signature_after, signature_before,
+            "migration must never reseal history"
+        );
+        assert!(matches!(
+            store
+                .load_event("Upgrade", "normalized-jsonb-signature", 1)
+                .await,
+            Err(EventStoreError::Integrity { .. })
+        ));
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_live_payload_migration_scopes_same_named_tables_by_search_path() {
+        let Some(store) = setup_test_store().await else {
+            return;
+        };
+        let url = env::var("ARC_POSTGRES_TEST_DATABASE_URL").unwrap();
+        let other_schema = format!("arc_jsonb_events_{}", std::process::id());
+        sqlx::query(&format!("CREATE SCHEMA {other_schema}"))
+            .execute(store.pool())
+            .await
+            .unwrap();
+        sqlx::query(&format!(
+            "CREATE TABLE {other_schema}.events (payload JSONB NOT NULL)"
+        ))
+        .execute(store.pool())
+        .await
+        .unwrap();
+        sqlx::query(&format!(
+            "INSERT INTO {other_schema}.events (payload) VALUES ('{{\"large\": 1000000000000000000}}'::jsonb)"
+        ))
+        .execute(store.pool())
+        .await
+        .unwrap();
+
+        let search_path = format!("public,{other_schema}");
+        let options = PgConnectOptions::from_str(&url).unwrap().options([
+            ("search_path", search_path.as_str()),
+            ("lock_timeout", "250ms"),
+        ]);
+        let target_pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        let target_store = PostgresEventStore::with_pool(target_pool);
+        target_store.initialize_schema().await.unwrap();
+        target_store.initialize_schema().await.unwrap();
+
+        let lock_pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&url)
+            .await
+            .unwrap();
+        let mut lock_tx = lock_pool.begin().await.unwrap();
+        sqlx::query("LOCK TABLE public.events IN ACCESS SHARE MODE")
+            .execute(&mut *lock_tx)
+            .await
+            .unwrap();
+        // Isolate the migration's idempotent lock behavior from the existing
+        // startup index refresh, which independently acquires table locks.
+        for _ in 0..2 {
+            sqlx::raw_sql(EVENTS_PAYLOAD_JSON_MIGRATION)
+                .execute(target_store.pool())
+                .await
+                .unwrap();
+        }
+        lock_tx.rollback().await.unwrap();
+
+        let target_type: String = sqlx::query_scalar(
+            "SELECT t.typname FROM pg_attribute a JOIN pg_type t ON t.oid = a.atttypid WHERE a.attrelid = 'public.events'::regclass AND a.attname = 'payload' AND NOT a.attisdropped",
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+        let other_type: String = sqlx::query_scalar(
+            &format!("SELECT t.typname FROM pg_attribute a JOIN pg_type t ON t.oid = a.atttypid WHERE a.attrelid = '{other_schema}.events'::regclass AND a.attname = 'payload' AND NOT a.attisdropped"),
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+        let other_payload: serde_json::Value =
+            sqlx::query_scalar(&format!("SELECT payload FROM {other_schema}.events"))
+                .fetch_one(store.pool())
+                .await
+                .unwrap();
+        assert_eq!(target_type, "json");
+        assert_eq!(
+            other_type, "jsonb",
+            "migration must not alter a same-named table outside its search path target"
+        );
+        assert_eq!(
+            other_payload,
+            json!({"large": 1_000_000_000_000_000_000_u64})
+        );
+
+        target_store.pool().close().await;
+        lock_pool.close().await;
+        sqlx::query(&format!("DROP SCHEMA {other_schema} CASCADE"))
+            .execute(store.pool())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_live_numeric_payload_mutation_changes_authoritative_event() {
+        let Some(store) = setup_integrity_test_store().await else {
+            return;
+        };
+        let mut event = stamped_event(
+            "Numeric",
+            "numeric-tamper",
+            1,
+            "NumericEvent",
+            serde_json::from_str(r#"{"value":1e18}"#).unwrap(),
+        );
+        event.timestamp = 1_700_000_000_000;
+        store
+            .append_to(
+                "Numeric",
+                "numeric-tamper",
+                VersionCheck::New,
+                vec![event.clone()],
+            )
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE events SET payload = '{\"value\":1.0}' WHERE aggregate_id = 'numeric-tamper'",
+        )
+        .execute(store.pool())
+        .await
+        .unwrap();
+
+        assert!(matches!(
+            store.load_event("Numeric", "numeric-tamper", 1).await,
+            Err(EventStoreError::Integrity { .. })
+        ));
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_live_numeric_envelope_mismatch_rejects_without_projection_mutation() {
+        let Some(store) = setup_test_store().await else {
+            return;
+        };
+        let event = stamped_event(
+            "Numeric",
+            "numeric-envelope-tamper",
+            1,
+            "NumericCommanded",
+            serde_json::from_str(r#"{"value":1e18}"#).unwrap(),
+        );
+        store
+            .append_to(
+                "Numeric",
+                "numeric-envelope-tamper",
+                VersionCheck::New,
+                vec![event.clone()],
+            )
+            .await
+            .unwrap();
+        let applied = Arc::new(AtomicUsize::new(0));
+        let mut engine = ProjectionEngine::new(Box::new(store));
+        engine.register(Box::new(ApplyCounter(applied.clone())));
+        let mut modified = event;
+        modified.payload = serde_json::from_str(r#"{"value":1.0}"#).unwrap();
+
+        let result = engine.process_external_delivery(&modified).await;
+        assert!(matches!(
+            result,
+            Err(arc_core::projection::ExternalProjectionError::EventMismatch)
+        ));
+        assert_eq!(applied.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
@@ -1042,6 +1693,10 @@ mod tests {
 
         let err = store.load("tamper-1").await.unwrap_err();
         assert!(matches!(err, EventStoreError::Integrity { .. }));
+        assert!(matches!(
+            store.load_event("User", "tamper-1", 1).await,
+            Err(EventStoreError::Integrity { .. })
+        ));
     }
 
     #[tokio::test]

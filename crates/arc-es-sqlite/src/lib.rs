@@ -561,6 +561,72 @@ impl EventStore for SqliteEventStore {
         self.load_stream_from(aggregate_type, aggregate_id, 1).await
     }
 
+    async fn load_event(
+        &self,
+        aggregate_type: &str,
+        aggregate_id: &str,
+        sequence: i64,
+    ) -> EventStoreResult<Option<Event>> {
+        let aggregate_type = aggregate_type.to_string();
+        let aggregate_id = aggregate_id.to_string();
+        let pool = self.pool.clone();
+        let integrity = self.integrity.clone();
+
+        tokio::task::spawn_blocking(move || {
+            use diesel::connection::AnsiTransactionManager;
+            use diesel::connection::TransactionManager;
+
+            let mut conn = pool.get().map_err(|e| {
+                EventStoreError::database(format!("Failed to get connection: {}", e))
+            })?;
+
+            AnsiTransactionManager::begin_transaction(&mut *conn)
+                .map_err(|e| EventStoreError::database(e.to_string()))?;
+
+            let result = (|| -> EventStoreResult<Option<Event>> {
+                let record = events::table
+                    .filter(events::aggregate_type.eq(&aggregate_type))
+                    .filter(events::aggregate_id.eq(&aggregate_id))
+                    .filter(events::sequence.eq(sequence))
+                    .first::<EventRecord>(&mut *conn)
+                    .optional()
+                    .map_err(|e| EventStoreError::database(e.to_string()))?;
+
+                let Some(record) = record else {
+                    return Ok(None);
+                };
+
+                match integrity.as_ref() {
+                    Some(integrity) => {
+                        let previous = previous_signature_for_aggregate(
+                            &mut conn,
+                            Some(&aggregate_type),
+                            &aggregate_id,
+                            sequence,
+                        )?;
+                        verify_integrity_records(integrity, &[record], previous)
+                            .map(|mut events| events.pop())
+                    }
+                    None => record.to_event().map(Some),
+                }
+            })();
+
+            match result {
+                Ok(event) => {
+                    AnsiTransactionManager::commit_transaction(&mut *conn)
+                        .map_err(|e| EventStoreError::database(e.to_string()))?;
+                    Ok(event)
+                }
+                Err(error) => {
+                    let _ = AnsiTransactionManager::rollback_transaction(&mut *conn);
+                    Err(error)
+                }
+            }
+        })
+        .await
+        .map_err(|e| EventStoreError::other(format!("Task join error: {}", e)))?
+    }
+
     async fn load_from(
         &self,
         aggregate_id: &str,
@@ -879,6 +945,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn load_event_uses_complete_stream_identity_and_sequence() {
+        let store = setup_test_store().await;
+        let event = stamped_event("User", "shared-id", 1, "UserCreated", json!({"v": 1}));
+        store
+            .append_to("User", "shared-id", VersionCheck::New, vec![event.clone()])
+            .await
+            .unwrap();
+        store
+            .append_to(
+                "Product",
+                "shared-id",
+                VersionCheck::New,
+                vec![stamped_event(
+                    "Product",
+                    "shared-id",
+                    1,
+                    "ProductCreated",
+                    json!({}),
+                )],
+            )
+            .await
+            .unwrap();
+
+        let loaded = store.load_event("User", "shared-id", 1).await.unwrap();
+        let other_type = store.load_event("Order", "shared-id", 1).await.unwrap();
+        let other_sequence = store.load_event("User", "shared-id", 2).await.unwrap();
+
+        assert_eq!(
+            loaded.as_ref().map(|event| event.event_id),
+            Some(event.event_id)
+        );
+        assert_eq!(other_type, None);
+        assert_eq!(other_sequence, None);
+    }
+
+    #[tokio::test]
+    async fn load_event_verifies_the_persisted_integrity_signature() {
+        let store = setup_integrity_test_store().await;
+        let mut first = stamped_event("User", "integrity-user", 1, "UserCreated", json!({"v": 1}));
+        first.timestamp = 1_700_000_000_000;
+        let mut second = stamped_event("User", "integrity-user", 2, "UserUpdated", json!({"v": 2}));
+        second.timestamp = 1_700_000_001_000;
+        store
+            .append_to(
+                "User",
+                "integrity-user",
+                VersionCheck::New,
+                vec![first, second.clone()],
+            )
+            .await
+            .unwrap();
+
+        let loaded = store.load_event("User", "integrity-user", 2).await.unwrap();
+        assert_eq!(loaded, Some(second));
+    }
+
+    #[tokio::test]
     async fn same_instance_id_is_isolated_by_aggregate_type() {
         let store = setup_test_store().await;
         store
@@ -1019,6 +1142,10 @@ mod tests {
             matches!(err, EventStoreError::Integrity { .. }),
             "expected integrity error, got {err:?}"
         );
+        assert!(matches!(
+            store.load_event("User", "tamper-1", 1).await,
+            Err(EventStoreError::Integrity { .. })
+        ));
     }
 
     #[tokio::test]

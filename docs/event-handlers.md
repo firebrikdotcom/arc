@@ -182,6 +182,29 @@ delivery:
 
 That endpoint/service should authenticate the call, deserialize the envelope, run the relevant
 projector through the read-model store, and return 2xx only after the projection write is durable.
+Arc's built-in projection endpoint also verifies that the complete envelope matches the event at
+the same `(aggregate_type, aggregate_id, sequence)` in the authoritative event store. A missing or
+modified event is rejected before any projection write; store lookup or integrity failures fail
+closed. The endpoint projects the stored event value after this comparison.
+
+`CommandBus` canonicalizes the event's millisecond `timestamp` to whole-second milliseconds before
+it appends, publishes, applies to snapshots, or returns the event. This matches the persisted event
+format; the separate audit `timestamp_utc_us` keeps its microsecond precision. Keep external
+publishers on this command-bus path when events are intended for Arc projections. Direct callers of
+`EventBus::publish` do not receive this canonicalization or authoritative-origin guarantee.
+
+PostgreSQL stores authoritative event payloads in `JSON`, preserving the serialized JSON number
+representation needed for complete event equality (including integer versus floating-point forms,
+exponents, and large integer values). `arc-es-postgres::initialize_schema()` applies the idempotent
+forward migration from legacy `JSONB` using `payload::json`; read-model and snapshot columns remain
+`JSONB`. The migration does not update integrity signatures. JSONB may already have normalized
+historical numeric payloads, so affected old signatures can be unrecoverable and integrity checks
+must fail closed rather than resealing those rows.
+
+Queued envelopes produced before this canonical timestamp contract may fail full-envelope
+comparison on redelivery. Recover by replaying the persisted event from the authoritative store;
+do not loosen the comparison or edit the historical envelope. A publish failure after append is
+also recovered by publishing the persisted event, rather than redispatching the command.
 In `EVENT_BUS=inprocess` dev mode, projections are still driven synchronously in-process — see §6.
 
 ## 4. Idempotency expectations
