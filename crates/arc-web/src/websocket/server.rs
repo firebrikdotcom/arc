@@ -1,7 +1,12 @@
 use actix::prelude::*;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use tracing::info;
 use uuid::Uuid;
+
+use crate::websocket::security::{
+    OwnUserRoomPolicy, SharedWebSocketRoomPolicy, WebSocketPrincipal,
+};
 
 /// Message to connect a new client
 #[derive(Message)]
@@ -81,14 +86,20 @@ pub struct WsServer {
     rooms: HashMap<String, HashSet<Uuid>>,
     /// Map of user ID to set of connection IDs (for user-specific broadcasts)
     user_connections: HashMap<String, HashSet<Uuid>>,
+    room_policy: SharedWebSocketRoomPolicy,
 }
 
 impl WsServer {
     pub fn new() -> Self {
+        Self::with_room_policy(Arc::new(OwnUserRoomPolicy))
+    }
+
+    pub fn with_room_policy(room_policy: SharedWebSocketRoomPolicy) -> Self {
         WsServer {
             connections: HashMap::new(),
             rooms: HashMap::new(),
             user_connections: HashMap::new(),
+            room_policy,
         }
     }
 
@@ -177,18 +188,25 @@ impl Handler<Subscribe> for WsServer {
     type Result = ();
 
     fn handle(&mut self, msg: Subscribe, _: &mut Context<Self>) {
-        // Add connection to room
+        // Authorization happens in this actor, immediately before mutation,
+        // so direct actor messages cannot bypass the WebSocket parser.
+        let authorized = self
+            .connections
+            .get(&msg.id)
+            .and_then(|conn| conn.user_id.as_deref())
+            .and_then(WebSocketPrincipal::new)
+            .is_some_and(|principal| self.room_policy.permits(&principal, &msg.room));
+        if !authorized {
+            return;
+        }
+
         self.rooms
             .entry(msg.room.clone())
             .or_default()
             .insert(msg.id);
-
-        // Track room in connection
         if let Some(conn) = self.connections.get_mut(&msg.id) {
-            conn.rooms.insert(msg.room.clone());
+            conn.rooms.insert(msg.room);
         }
-
-        // Debug: Connection subscribed to room
     }
 }
 
@@ -256,5 +274,166 @@ impl Handler<BroadcastAll> for WsServer {
             }
             self.send_message(id, &msg.message);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::sync::mpsc;
+
+    struct TestClient(mpsc::UnboundedSender<String>);
+
+    impl Actor for TestClient {
+        type Context = Context<Self>;
+    }
+
+    impl Handler<WsMessage> for TestClient {
+        type Result = ();
+
+        fn handle(&mut self, message: WsMessage, _: &mut Self::Context) {
+            let _ = self.0.send(message.0);
+        }
+    }
+
+    fn connect(
+        server: &mut WsServer,
+        id: Uuid,
+        user_id: Option<&str>,
+    ) -> mpsc::UnboundedReceiver<String> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let client = TestClient(tx).start();
+        Handler::<Connect>::handle(
+            server,
+            Connect {
+                id,
+                user_id: user_id.map(str::to_owned),
+                addr: client.recipient(),
+            },
+            &mut Context::new(),
+        );
+        // The recipient stored by WsServer keeps delivery addressed to this actor.
+        rx
+    }
+
+    #[actix::test]
+    async fn actor_authorizes_membership_and_preserves_user_delivery() {
+        let mut server = WsServer::new();
+        let alice_id = Uuid::new_v4();
+        let bob_id = Uuid::new_v4();
+        let mut alice_messages = connect(&mut server, alice_id, Some("alice"));
+        let mut bob_messages = connect(&mut server, bob_id, Some("bob"));
+
+        Handler::<Subscribe>::handle(
+            &mut server,
+            Subscribe {
+                id: alice_id,
+                room: "user:alice".into(),
+            },
+            &mut Context::new(),
+        );
+        Handler::<Subscribe>::handle(
+            &mut server,
+            Subscribe {
+                id: alice_id,
+                room: "user:bob".into(),
+            },
+            &mut Context::new(),
+        );
+        Handler::<Subscribe>::handle(
+            &mut server,
+            Subscribe {
+                id: alice_id,
+                room: "unknown".into(),
+            },
+            &mut Context::new(),
+        );
+        Handler::<Subscribe>::handle(
+            &mut server,
+            Subscribe {
+                id: bob_id,
+                room: "user:alice".into(),
+            },
+            &mut Context::new(),
+        );
+
+        assert_eq!(
+            server.rooms.get("user:alice"),
+            Some(&HashSet::from([alice_id]))
+        );
+        assert!(!server.rooms.contains_key("user:bob"));
+        assert!(!server.rooms.contains_key("unknown"));
+
+        Handler::<BroadcastToRoom>::handle(
+            &mut server,
+            BroadcastToRoom {
+                room: "user:alice".into(),
+                message: "room-message".into(),
+                skip_id: None,
+            },
+            &mut Context::new(),
+        );
+        Handler::<BroadcastToUser>::handle(
+            &mut server,
+            BroadcastToUser {
+                user_id: "alice".into(),
+                message: "user-message".into(),
+            },
+            &mut Context::new(),
+        );
+        assert_eq!(alice_messages.recv().await.as_deref(), Some("room-message"));
+        assert_eq!(alice_messages.recv().await.as_deref(), Some("user-message"));
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(25), bob_messages.recv())
+                .await
+                .is_err()
+        );
+
+        Handler::<Unsubscribe>::handle(
+            &mut server,
+            Unsubscribe {
+                id: alice_id,
+                room: "user:alice".into(),
+            },
+            &mut Context::new(),
+        );
+        assert!(!server.rooms.contains_key("user:alice"));
+        assert!(!server
+            .connections
+            .get(&alice_id)
+            .unwrap()
+            .rooms
+            .contains("user:alice"));
+
+        Handler::<Subscribe>::handle(
+            &mut server,
+            Subscribe {
+                id: alice_id,
+                room: "user:alice".into(),
+            },
+            &mut Context::new(),
+        );
+        Handler::<Disconnect>::handle(
+            &mut server,
+            Disconnect { id: alice_id },
+            &mut Context::new(),
+        );
+        assert!(!server.rooms.contains_key("user:alice"));
+        assert!(!server.connections.contains_key(&alice_id));
+        assert!(!server.user_connections.contains_key("alice"));
+    }
+
+    #[test]
+    fn unknown_connection_id_cannot_create_room_membership() {
+        let mut server = WsServer::new();
+        Handler::<Subscribe>::handle(
+            &mut server,
+            Subscribe {
+                id: Uuid::new_v4(),
+                room: "user:alice".into(),
+            },
+            &mut Context::new(),
+        );
+        assert!(server.rooms.is_empty());
     }
 }
