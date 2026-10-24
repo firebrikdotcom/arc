@@ -8,8 +8,15 @@ It is intended for production deployments and multi-process Arc applications.
 ## What It Provides
 
 - `PostgresEventStore`: append-only event store with optimistic concurrency.
-- `PostgresReadModelStore`: JSONB read-model storage for projections.
+- `PostgresReadModelStore`: JSONB read-model storage for projections. Event-log
+  payloads use PostgreSQL `JSON` so numeric JSON text round-trips exactly for
+  strict persisted-event equality.
 - Self-initializing schema helpers for events, snapshots, and read models.
+- An idempotent forward migration converts legacy `events.payload` JSONB to
+  JSON with `USING payload::json`; `initialize_schema()` runs it for existing
+  databases and fresh schemas converge on JSON. It never rewrites integrity
+  signatures. Historical JSONB normalization may already have invalidated some
+  signatures; those events fail closed and must not be resealed.
 - Optional HMAC integrity-chain enforcement for persisted events.
 
 ## Example

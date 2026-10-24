@@ -193,6 +193,14 @@ format; the separate audit `timestamp_utc_us` keeps its microsecond precision. K
 publishers on this command-bus path when events are intended for Arc projections. Direct callers of
 `EventBus::publish` do not receive this canonicalization or authoritative-origin guarantee.
 
+PostgreSQL stores authoritative event payloads in `JSON`, preserving the serialized JSON number
+representation needed for complete event equality (including integer versus floating-point forms,
+exponents, and large integer values). `arc-es-postgres::initialize_schema()` applies the idempotent
+forward migration from legacy `JSONB` using `payload::json`; read-model and snapshot columns remain
+`JSONB`. The migration does not update integrity signatures. JSONB may already have normalized
+historical numeric payloads, so affected old signatures can be unrecoverable and integrity checks
+must fail closed rather than resealing those rows.
+
 Queued envelopes produced before this canonical timestamp contract may fail full-envelope
 comparison on redelivery. Recover by replaying the persisted event from the authoritative store;
 do not loosen the comparison or edit the historical envelope. A publish failure after append is
