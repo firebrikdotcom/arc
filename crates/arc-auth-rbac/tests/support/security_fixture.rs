@@ -5,7 +5,7 @@ use actix_web::{cookie::Key, web, App, HttpResponse, HttpServer};
 use arc_auth_core::IdentityStore;
 use arc_auth_db::{DbIdentityPlugin, DbIdentityStore};
 use arc_auth_rbac::RequireRoles;
-use arc_auth_session::{authenticate, sign_out, RequireSession};
+use arc_auth_session::{authenticate, cache_identity, sign_out, RequireSession};
 use arc_core::session::{InMemorySessionStore, SessionRecord, SessionStore};
 use arc_web::{
     helpers::jwt::create_token,
@@ -14,6 +14,7 @@ use arc_web::{
     },
     websocket::{
         connection::ws_handler,
+        security::WebSocketOriginAllowlist,
         server::{BroadcastToRoom, BroadcastToUser, WsServer},
     },
 };
@@ -53,12 +54,17 @@ async fn main() -> std::io::Result<()> {
     }
     let outage_path = path.clone();
     let identities: Arc<dyn IdentityStore> = Arc::new(store);
+    let websocket_principal = arc_auth_session::websocket_principal_provider();
+    let websocket_origins =
+        WebSocketOriginAllowlist::new(["http://127.0.0.1:18764"]).expect("fixture origin is valid");
     let sessions: Arc<dyn SessionStore> = Arc::new(InMemorySessionStore::new());
     let sockets = WsServer::new().start();
     let key = Key::generate();
     let server = HttpServer::new(move || App::new()
         .app_data(web::Data::new(outage_path.clone()))
         .app_data(web::Data::from(identities.clone()))
+        .app_data(web::Data::from(websocket_principal.clone()))
+        .app_data(web::Data::new(websocket_origins.clone()))
         .app_data(web::Data::from(sessions.clone()))
         .app_data(web::Data::new(sockets.clone()))
         .wrap(SessionMiddleware::builder(CookieSessionStore::default(), key.clone()).cookie_secure(false).cookie_http_only(true).build())
@@ -72,6 +78,13 @@ async fn main() -> std::io::Result<()> {
             let (token, jti) = create_token(&user.id).unwrap();
             sessions.record_session(SessionRecord { jti, actor_id: user.id.clone(), created_at_us: 1, expires_at_us: i64::MAX, revoked_at_us: None }).await.unwrap();
             HttpResponse::Ok().json(serde_json::json!({"id":user.id,"token":token}))
+        }))
+        .route("/fixture/cache-only", web::get().to(|session: Session| async move {
+            cache_identity(&session, &arc_auth_core::Identity {
+                id: "cached-only-user".into(), name: "Cached".into(),
+                email: "cached@example.test".into(), active: true, roles: vec!["admin".into()],
+            });
+            HttpResponse::NoContent().finish()
         }))
         .route("/fixture/change/{name}/{change}", web::post().to(|p: web::Path<(String,String)>, store: web::Data<dyn IdentityStore>| async move {
             let user = store.list().await.unwrap().into_iter().find(|u| u.name == p.0).unwrap();

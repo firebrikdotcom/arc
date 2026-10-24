@@ -6,7 +6,10 @@ use std::time::{Duration, Instant};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::websocket::server::{Connect, Disconnect, Subscribe, Unsubscribe, WsMessage, WsServer};
+use crate::websocket::{
+    security::{PrincipalResolutionError, WebSocketOriginAllowlist, WebSocketPrincipalProvider},
+    server::{Connect, Disconnect, Subscribe, Unsubscribe, WsMessage, WsServer},
+};
 
 /// How often heartbeat pings are sent
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
@@ -146,14 +149,33 @@ pub async fn ws_handler(
     session: Session,
     server: web::Data<Addr<WsServer>>,
 ) -> Result<HttpResponse, Error> {
-    // Pull the aggregate UUID out of the cached `SessionUser`, if any.
-    let user_id = session
-        .get::<crate::helpers::session::SessionUser>("user")
-        .ok()
-        .flatten()
-        .map(|u| u.id);
+    let origin_policy = req
+        .app_data::<web::Data<WebSocketOriginAllowlist>>()
+        .map(|policy| policy.get_ref().clone())
+        .unwrap_or_else(WebSocketOriginAllowlist::empty);
+    let origin_values = req
+        .headers()
+        .get_all(actix_web::http::header::ORIGIN)
+        .map(|value| value.to_str().unwrap_or(""));
+    if !origin_policy.allows_headers(origin_values) {
+        return Ok(HttpResponse::Forbidden().finish());
+    }
 
-    let ws_connection = WsConnection::new(user_id, server.get_ref().clone());
+    let Some(provider) = req.app_data::<web::Data<dyn WebSocketPrincipalProvider>>() else {
+        return Ok(HttpResponse::ServiceUnavailable().finish());
+    };
+    let principal = match provider.resolve(&req, &session).await {
+        Ok(Some(principal)) => principal,
+        Ok(None) => return Ok(HttpResponse::Unauthorized().finish()),
+        Err(PrincipalResolutionError::Unavailable) => {
+            return Ok(HttpResponse::ServiceUnavailable().finish())
+        }
+    };
+
+    let ws_connection = WsConnection::new(
+        Some(principal.user_id().to_owned()),
+        server.get_ref().clone(),
+    );
 
     ws::start(ws_connection, &req, stream)
 }

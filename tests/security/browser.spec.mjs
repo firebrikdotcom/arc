@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
+import net from 'node:net';
 const baseURL = process.env.ARC_SECURITY_URL || 'http://127.0.0.1:18764';
-const desired = process.env.ARC_SECURITY_CONTRACTS === '1';
 async function reset(request) {
   for (const name of ['alice','bob']) expect((await request.post(`/fixture/change/${name}/reset`)).status()).toBe(204);
 }
@@ -12,6 +12,7 @@ for (const change of ['remove-role', 'disable']) {
     expect(saved.some(c => c.httpOnly)).toBe(true);
     expect((await page.goto('/browser/admin')).url()).toBe(`${baseURL}/browser/admin`);
     expect((await request.post(`/fixture/change/alice/${change}`)).status()).toBe(204);
+    expect((await page.request.get('/ws', {headers:{Origin:'http://127.0.0.1:18764'}})).status()).toBe(401);
     expect((await request.get('/api/admin', {headers:{Authorization:`Bearer ${login.token}`}})).status()).toBe(403);
     await page.goto('/browser/admin');
     await expect(page).toHaveURL(/\/signin$/);
@@ -59,6 +60,7 @@ test('store outage denies browser access and logout, then recovers', async ({pag
   try {
     expect((await page.goto('/browser/admin')).status()).toBe(503);
     await expect(page.locator('body')).toContainText('Authentication is temporarily unavailable.');
+    expect((await page.request.get('/ws', {headers:{Origin:'http://127.0.0.1:18764'}})).status()).toBe(503);
     expect((await page.goto('/resources')).status()).toBe(503);
     expect((await page.request.post('/fixture/logout')).status()).toBe(503);
   } finally { await request.post('/fixture/outage/off'); }
@@ -130,33 +132,68 @@ async function subscribe(page, room) {
   await page.evaluate(room => { socket.send(JSON.stringify({type:'subscribe',room})); socket.send(JSON.stringify({type:'ping'})); },room);
   await expect.poll(() => page.evaluate(() => messages.includes('{"type":"pong"}'))).toBe(true);
 }
-test('GAP anonymous socket can subscribe to private room', async ({page,request}) => {
-  await page.goto('/');
-  const opened = await openSocket(page);
-  if (desired) { expect(opened, 'desired authenticated handshake').toBe(false); return; }
-  expect(opened).toBe(true);
-  await subscribe(page, 'private');
-  await request.post('/fixture/room/private');
-  await expect.poll(() => page.evaluate(() => messages)).toContain('private-room-message');
-  await page.evaluate(() => socket.close());
+async function rawResponseStatus(headerLines) {
+  const target = new URL(baseURL);
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection({host: target.hostname, port: Number(target.port)}, () => {
+      socket.write([
+        'GET /ws HTTP/1.1',
+        `Host: ${target.host}`,
+        ...headerLines,
+        'Connection: close',
+        '',
+        '',
+      ].join('\r\n'));
+    });
+    let response = '';
+    socket.setTimeout(3000, () => socket.destroy(new Error('raw HTTP request timed out')));
+    socket.on('data', chunk => {
+      response += chunk.toString('latin1');
+      const status = response.match(/^HTTP\/1\.1 (\d{3})/);
+      if (status) {
+        socket.destroy();
+        resolve(Number(status[1]));
+      }
+    });
+    socket.on('error', reject);
+  });
+}
+test('WebSocket handshake denies missing, null, malformed, and unapproved origins and unauthenticated identity', async ({request}) => {
+  const allowedOrigin = 'http://127.0.0.1:18764';
+  expect((await request.get('/ws')).status()).toBe(403);
+  expect((await request.get('/ws', {headers:{Origin:'null'}})).status()).toBe(403);
+  expect((await request.get('/ws', {headers:{Origin:'not an origin'}})).status()).toBe(403);
+  expect((await request.get('/ws', {headers:{Origin:'http://127.0.0.1:18764/a/..'}})).status()).toBe(403);
+  expect(await rawResponseStatus([
+    'Origin: http://127.0.0.1:18764',
+    'Origin: http://127.0.0.1:18764',
+  ])).toBe(403);
+  expect((await request.get('/ws', {headers:{Origin:'http://localhost:18764'}})).status()).toBe(403);
+  expect((await request.get('/ws', {headers:{Origin:allowedOrigin}})).status()).toBe(401);
+  await request.get('/fixture/cache-only');
+  expect((await request.get('/ws', {headers:{Origin:allowedOrigin}})).status()).toBe(401);
 });
-test('user broadcasts isolate users; GAP arbitrary room permits cross-user disclosure', async ({browser, request}) => {
+test('verified user may join only their own room and user broadcasts stay isolated', async ({browser, request}) => {
   const alice = await browser.newContext(), bob = await browser.newContext();
   try {
     const a = await alice.newPage(), b = await bob.newPage();
     const user = await (await a.goto(`${baseURL}/fixture/login/alice`)).json();
     await b.goto(`${baseURL}/fixture/login/bob`);
     expect(await openSocket(a)).toBe(true); expect(await openSocket(b)).toBe(true);
-    await subscribe(a, `user:${user.id}`); await subscribe(b, `user:${user.id}`);
+    await subscribe(a, `user:${user.id}`);
+    await subscribe(b, `user:${user.id}`);
+    await subscribe(b, 'unknown');
     await request.post(`/fixture/user/${user.id}`);
     await expect.poll(() => a.evaluate(() => messages)).toContain('private-user-message');
-    // Ordered round-trip barrier then check Bob, instead of a negative sleep assertion.
     const pongCount = await b.evaluate(() => messages.filter(m => m === '{"type":"pong"}').length);
     await b.evaluate(() => socket.send(JSON.stringify({type:'ping'})));
     await expect.poll(() => b.evaluate(() => messages.filter(m => m === '{"type":"pong"}').length)).toBe(pongCount + 1);
     expect(await b.evaluate(() => messages)).not.toContain('private-user-message');
     await request.post(`/fixture/room/${encodeURIComponent(`user:${user.id}`)}`);
-    await expect.poll(() => b.evaluate(() => messages)).toContain('private-room-message');
-    if (desired) expect(await b.evaluate(() => messages), 'desired room authorization').not.toContain('private-room-message');
+    await expect.poll(() => a.evaluate(() => messages)).toContain('private-room-message');
+    const roomPongs = await b.evaluate(() => messages.filter(m => m === '{"type":"pong"}').length);
+    await b.evaluate(() => socket.send(JSON.stringify({type:'ping'})));
+    await expect.poll(() => b.evaluate(() => messages.filter(m => m === '{"type":"pong"}').length)).toBe(roomPongs + 1);
+    expect(await b.evaluate(() => messages)).not.toContain('private-room-message');
   } finally { await alice.close(); await bob.close(); }
 });

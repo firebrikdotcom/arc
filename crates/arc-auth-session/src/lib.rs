@@ -8,7 +8,12 @@ use actix_web::{
     web, Error, HttpMessage, HttpResponse,
 };
 use arc_auth_core::{AuthError, Identity, IdentityStore};
-use arc_web::{ArcAppBuilder, ArcPlugin};
+use arc_web::{
+    websocket::security::{
+        PrincipalResolutionError, WebSocketPrincipal, WebSocketPrincipalProvider,
+    },
+    ArcAppBuilder, ArcPlugin,
+};
 use futures_util::future::LocalBoxFuture;
 use std::{
     future::{ready, Ready},
@@ -110,7 +115,46 @@ impl ArcPlugin for SessionAuthPlugin {
         "auth-session"
     }
     fn register(&self, builder: ArcAppBuilder) -> ArcAppBuilder {
-        builder
+        builder.register_data(websocket_principal_provider())
+    }
+}
+
+/// Resolves the browser's opaque handle through the authoritative identity
+/// store on each WebSocket handshake. Cached `SessionUser` values are ignored.
+pub struct SessionWebSocketPrincipalProvider;
+
+pub fn websocket_principal_provider() -> Arc<dyn WebSocketPrincipalProvider> {
+    Arc::new(SessionWebSocketPrincipalProvider)
+}
+
+#[async_trait::async_trait(?Send)]
+impl WebSocketPrincipalProvider for SessionWebSocketPrincipalProvider {
+    async fn resolve(
+        &self,
+        request: &actix_web::HttpRequest,
+        session: &Session,
+    ) -> Result<Option<WebSocketPrincipal>, PrincipalResolutionError> {
+        let Some(handle) = session.get::<String>(BROWSER_SESSION_KEY).ok().flatten() else {
+            return Ok(None);
+        };
+        let Some(store) = request.app_data::<web::Data<dyn IdentityStore>>() else {
+            tracing::error!(
+                operation = "validate_websocket_session",
+                "identity store missing"
+            );
+            return Err(PrincipalResolutionError::Unavailable);
+        };
+        match store.browser_identity(&handle).await {
+            Ok(Some(identity)) if identity.active => Ok(WebSocketPrincipal::new(identity.id)),
+            Ok(_) => Ok(None),
+            Err(_) => {
+                tracing::error!(
+                    operation = "validate_websocket_session",
+                    "identity store unavailable"
+                );
+                Err(PrincipalResolutionError::Unavailable)
+            }
+        }
     }
 }
 

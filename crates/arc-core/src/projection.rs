@@ -159,6 +159,27 @@ impl ProjectionError {
 /// Result type for projection operations.
 pub type ProjectionResult<T> = Result<T, ProjectionError>;
 
+/// Failure reasons for events received through an external projection
+/// delivery boundary.
+#[derive(Debug, Error)]
+pub enum ExternalProjectionError {
+    /// The event identity does not exist in the authoritative event store.
+    #[error("event is not present in the authoritative event store")]
+    MissingEvent,
+
+    /// The submitted event differs from the event persisted under its identity.
+    #[error("submitted event differs from the authoritative persisted event")]
+    EventMismatch,
+
+    /// The store could not verify or retrieve the authoritative event.
+    #[error("authoritative event lookup failed: {0}")]
+    EventStore(String),
+
+    /// A registered projection failed after the stored event was verified.
+    #[error("projection failed: {0}")]
+    Projection(String),
+}
+
 // ---------------------------------------------------------------------------
 // Projector trait — the stateless event handler
 // ---------------------------------------------------------------------------
@@ -426,6 +447,35 @@ impl ProjectionEngine {
             }
         }
         Ok(())
+    }
+
+    /// Validate an externally delivered event against the exact persisted
+    /// stream event, then project the authoritative stored value.
+    ///
+    /// Unlike [`Self::process`], this method is intended for untrusted delivery
+    /// boundaries. Stores without bounded `load_event` support fail closed.
+    pub async fn process_external_delivery(
+        &self,
+        submitted: &Event,
+    ) -> Result<(), ExternalProjectionError> {
+        let stored = self
+            .event_store
+            .load_event(
+                &submitted.aggregate_type,
+                &submitted.aggregate_id,
+                submitted.sequence,
+            )
+            .await
+            .map_err(|error| ExternalProjectionError::EventStore(error.to_string()))?
+            .ok_or(ExternalProjectionError::MissingEvent)?;
+
+        if stored != *submitted {
+            return Err(ExternalProjectionError::EventMismatch);
+        }
+
+        self.process(&stored)
+            .await
+            .map_err(|error| ExternalProjectionError::Projection(error.to_string()))
     }
 
     /// Process multiple events in sequence.
