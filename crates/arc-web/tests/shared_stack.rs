@@ -1,7 +1,7 @@
 use actix_web::{web, HttpResponse};
 use arc_core::{
     aggregate::{Aggregate, Command},
-    command_bus::{CommandBus, CommandContext},
+    command_bus::{CommandBus, CommandContext, SnapshotPolicy},
     event::{Event, NewEvent},
     projection::{ProjectionError, ProjectionResult, Projector},
     read_model_store::{ReadModelStore, Upsert},
@@ -17,6 +17,8 @@ use async_trait::async_trait;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Default)]
 struct Item {
@@ -96,15 +98,14 @@ async fn request(port: u16, method: &str, id: &str) -> String {
     stream.read_to_string(&mut response).await.unwrap();
     response
 }
-#[actix_web::test]
-async fn shared_stack_observes_writes_from_both_sides() {
-    let path = std::env::temp_dir().join(format!("arc-shared-{}.sqlite", uuid::Uuid::new_v4()));
+
+async fn create_stack(path: &std::path::Path) -> SharedStack<Item> {
     let url = path.to_str().unwrap();
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
         .max_connections(1)
         .connect_with(
             sqlx::sqlite::SqliteConnectOptions::new()
-                .filename(&path)
+                .filename(path)
                 .create_if_missing(true),
         )
         .await
@@ -118,6 +119,7 @@ async fn shared_stack_observes_writes_from_both_sides() {
     .await
     .unwrap();
     pool.close().await;
+
     let stack: SharedStack<Item> = es_stack::build_with_driver(
         DatabaseDriver::Sqlite,
         url,
@@ -128,6 +130,15 @@ async fn shared_stack_observes_writes_from_both_sides() {
     .unwrap()
     .into();
     stack.projection_engine.rebuild_all().await.unwrap();
+    stack
+}
+
+#[actix_web::test]
+async fn shared_stack_observes_writes_from_both_sides() {
+    let _guard = ENV_LOCK.lock().await;
+    let path = std::env::temp_dir().join(format!("arc-shared-{}.sqlite", uuid::Uuid::new_v4()));
+    let url = path.to_str().unwrap();
+    let stack = create_stack(&path).await;
     std::env::set_var("DATABASE_URL", url);
     std::env::set_var(
         "SECRET_KEY",
@@ -194,4 +205,95 @@ fn supplied_stack_rejects_projectors() {
     let _ = ArcApp::builder()
         .register_aggregate_with_stack(stack)
         .register_projectors(vec![]);
+}
+
+#[test]
+#[should_panic(
+    expected = "projectors and snapshot policy cannot be configured on a supplied stack"
+)]
+fn supplied_stack_rejects_snapshot_policy() {
+    let store = Arc::new(arc_core::read_model_store::InMemoryReadModelStore::new());
+    let event_store = arc_core::event_store::InMemoryEventStore::new();
+    let stack = SharedStack {
+        command_bus: Arc::new(CommandBus::<Item>::new(
+            Box::new(event_store.clone()),
+            Box::new(arc_core::event_bus::InProcessEventBus::new()),
+        )),
+        read_model_store: store,
+        projection_engine: Arc::new(arc_core::projection::ProjectionEngine::new(Box::new(
+            event_store,
+        ))),
+    };
+    let _ = ArcApp::builder()
+        .register_aggregate_with_stack(stack)
+        .snapshot_policy(Some(SnapshotPolicy::EveryNEvents(1)));
+}
+
+#[test]
+#[should_panic(
+    expected = "projectors and snapshot policy cannot be configured on a supplied stack"
+)]
+fn supplied_stack_rejects_empty_snapshot_policy() {
+    let store = Arc::new(arc_core::read_model_store::InMemoryReadModelStore::new());
+    let event_store = arc_core::event_store::InMemoryEventStore::new();
+    let stack = SharedStack {
+        command_bus: Arc::new(CommandBus::<Item>::new(
+            Box::new(event_store.clone()),
+            Box::new(arc_core::event_bus::InProcessEventBus::new()),
+        )),
+        read_model_store: store,
+        projection_engine: Arc::new(arc_core::projection::ProjectionEngine::new(Box::new(
+            event_store,
+        ))),
+    };
+    let _ = ArcApp::builder()
+        .register_aggregate_with_stack(stack)
+        .snapshot_policy(None);
+}
+
+#[actix_web::test]
+async fn shared_stack_clones_share_bus_and_store() {
+    let path =
+        std::env::temp_dir().join(format!("arc-shared-clone-{}.sqlite", uuid::Uuid::new_v4()));
+    let stack = create_stack(&path).await;
+    let other = stack.clone();
+
+    stack
+        .command_bus
+        .dispatch(
+            Create("from-clone-a".into()),
+            CommandContext::for_actor("test"),
+        )
+        .await
+        .unwrap();
+
+    assert!(other
+        .read_model_store
+        .get("items", "from-clone-a")
+        .await
+        .unwrap()
+        .is_some());
+
+    drop(stack);
+    drop(other);
+    let _ = std::fs::remove_file(path);
+}
+
+#[actix_web::test]
+async fn build_with_driver_uses_explicit_driver_even_if_env_differs() {
+    let _guard = ENV_LOCK.lock().await;
+    let prev_driver = std::env::var_os("DATABASE_DRIVER");
+    std::env::set_var("DATABASE_DRIVER", "postgres");
+
+    let path =
+        std::env::temp_dir().join(format!("arc-shared-driver-{}.sqlite", uuid::Uuid::new_v4()));
+    let stack = create_stack(&path).await;
+    drop(stack);
+
+    if let Some(value) = prev_driver {
+        std::env::set_var("DATABASE_DRIVER", value);
+    } else {
+        std::env::remove_var("DATABASE_DRIVER");
+    }
+    let _ = std::fs::remove_file(path);
 }
