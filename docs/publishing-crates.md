@@ -6,7 +6,7 @@ Arc's reusable crates are published in dependency order:
 2. `arc-auth-core`
 3. `arc-es-sqlite`, `arc-es-postgres`, and `arc-es-nats`
 4. `arc-stack`
-5. `arc-web`
+5. `arc-web` and `arc-ffi` (independent siblings)
 6. `arc-auth-db`, `arc-auth-session`, and `arc-auth-jwt`
 7. `arc-auth-admin`
 8. `arc-auth-rbac` (its packaged tests depend on `arc-auth-admin`)
@@ -19,8 +19,8 @@ workspace development. Publish or make `arc-core` available in the registry befo
 ## Preflight
 
 Run the package isolation gate first. It packages every reusable crate,
-compiles each packaged crate's tests, and compiles `arc-stack` and `arc-web` from temporary
-consumer outside the workspace:
+compiles each packaged crate's tests, and compiles `arc-stack`, `arc-web`, and the `arc-ffi` concrete native fixture from temporary
+consumers outside the workspace:
 
 ```bash
 make publish-check
@@ -55,6 +55,9 @@ cargo publish -p arc-es-nats
 make publish-check PUBLISH_CRATES=arc-stack
 cargo publish -p arc-stack
 
+make publish-check PUBLISH_CRATES=arc-ffi
+cargo publish -p arc-ffi
+
 make publish-check PUBLISH_CRATES=arc-web
 cargo publish -p arc-web
 
@@ -82,6 +85,7 @@ cargo publish -p arc-es-sqlite --dry-run
 cargo publish -p arc-es-postgres --dry-run
 cargo publish -p arc-es-nats --dry-run
 cargo publish -p arc-stack --dry-run
+cargo publish -p arc-ffi --dry-run
 cargo publish -p arc-web --dry-run
 cargo publish -p arc-web-cli --dry-run
 ```
@@ -105,3 +109,10 @@ compatible minor release line:
 
 Do not publish adapter crates with direct database-writing Benthos behavior. Benthos remains the
 routing/delivery layer; Arc-owned code owns projection writes.
+
+`arc-stack` and `arc-ffi` are unpublished source additions at the current workspace
+version, intended for the coordinated 0.8.12 candidate. Keep the twelve already
+published 0.8.11 packages distinct from the fourteen-package next-release inventory.
+The native adapter requires exact UniFFI 0.32.2; host binding generation is separate
+from its shipped dependencies. See [Native Adapters](ffi.md) for runtime, registry,
+feature isolation and the external Kotlin/Swift component smoke.

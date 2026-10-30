@@ -1,0 +1,31 @@
+[package]
+name = "arc-ffi"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Async native adapter runtime and shared core registry for Arc"
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["uniffi", "sqlite"]
+uniffi = ["dep:uniffi"]
+sqlite = ["arc-stack/sqlite"]
+postgres = ["arc-stack/postgres"]
+
+[dependencies]
+arc-core = { path = "../arc-core", version = "0.8.11" }
+arc-stack = { path = "../arc-stack", version = "0.8.11", default-features = false }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net"] }
+thiserror.workspace = true
+tracing.workspace = true
+uniffi = { version = "=0.32.2", default-features = false, optional = true }
+
+[dev-dependencies]
+arc-core = { path = "../arc-core", version = "0.8.11", features = ["test-utils"] }
+tokio = { version = "1", features = ["macros"] }
+async-trait.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+tempfile = "3"
+sqlx = { version = "0.8.6", default-features = false, features = ["sqlite", "runtime-tokio-rustls"] }

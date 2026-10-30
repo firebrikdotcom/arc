@@ -9,6 +9,7 @@ members = [
     "crates/arc-auth-rbac",
     "crates/arc-core",
     "crates/arc-stack",
+    "crates/arc-ffi",
     "crates/arc-es-sqlite",
     "crates/arc-es-postgres",
     "crates/arc-es-nats",

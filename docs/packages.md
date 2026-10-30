@@ -27,6 +27,8 @@ Generated applications use published crates; they do not depend on an Arc reposi
 |---|---|
 | `arc-web-cli` | Installs the `arc` generator command |
 | `arc-core` | Commands, aggregates, events, command bus, projections, read models |
+| `arc-stack` | Headless stack assembly (source addition, unpublished) |
+| `arc-ffi` | Async native adapter runtime and shared core registry (source addition, unpublished; see [Native Adapters](ffi.md)) |
 | `arc-web` | Actix runtime, server builder, middleware, and application wiring |
 | `arc-es-sqlite` | SQLite event, read-model, snapshot, and session stores |
 | `arc-es-postgres` | Optional Postgres stores |

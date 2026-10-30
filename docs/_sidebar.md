@@ -9,6 +9,7 @@
   * [Add an Endpoint](endpoints.md)
   * [Build a Resource](resources.md)
   * [Add a UI Page](ui.md)
+  * [Native Adapters](ffi.md)
   * [Configuration](configuration.md)
   * [Testing](testing.md)
 
