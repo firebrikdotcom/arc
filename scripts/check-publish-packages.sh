@@ -8,7 +8,7 @@ version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)"
 if (($#)); then
     crates=("$@")
 else
-    crates=(arc-core arc-auth-core arc-es-sqlite arc-es-postgres arc-es-nats arc-web arc-auth-db arc-auth-session arc-auth-jwt arc-auth-admin arc-auth-rbac arc-web-cli)
+    crates=(arc-core arc-auth-core arc-es-sqlite arc-es-postgres arc-es-nats arc-stack arc-web arc-auth-db arc-auth-session arc-auth-jwt arc-auth-admin arc-auth-rbac arc-web-cli)
 fi
 
 # Package the release together so Cargo can resolve unpublished workspace versions.
@@ -53,6 +53,29 @@ for crate in "${crates[@]}"; do
     cargo test --manifest-path "$package_dir/Cargo.toml" "${package_overrides[@]}" --all-features --no-run
 done
 
+if [[ " ${crates[*]} " =~ " arc-stack " ]]; then
+    consumer_dir="$(mktemp -d)"
+    trap 'rm -rf "$consumer_dir"' EXIT
+    mkdir -p "$consumer_dir/src"
+    cat >"$consumer_dir/Cargo.toml" <<EOF
+[package]
+name = "arc-stack-package-consumer"
+version = "0.1.0"
+edition = "2021"
+[dependencies]
+arc-stack = { path = "$repo_root/target/package/arc-stack-${version}" }
+EOF
+    echo 'fn main() { let _ = arc_stack::config::DatabaseDriver::Sqlite; }' >"$consumer_dir/src/main.rs"
+    cargo check --manifest-path "$consumer_dir/Cargo.toml" "${package_overrides[@]}"
+    tree=$(cargo tree --manifest-path "$consumer_dir/Cargo.toml" "${package_overrides[@]}" --edges normal,build --prefix none)
+    if printf '%s\n' "$tree" | grep -E '^(arc-web|actix[^ ]*|tera) v'; then
+        echo "Packaged headless stack contains web dependencies" >&2
+        exit 1
+    fi
+    rm -rf "$consumer_dir"
+    trap - EXIT
+fi
+
 if [[ ! " ${crates[*]} " =~ " arc-web " ]]; then
     echo "Selected publish-package verification passed."
     exit 0
@@ -70,13 +93,27 @@ edition = "2021"
 
 [dependencies]
 arc-web = { path = "$repo_root/target/package/arc-web-${version}", features = ["nats", "postgres"] }
+arc-stack = "${version}"
+arc-core = "${version}"
 EOF
 
 cat >"$consumer_dir/src/main.rs" <<'EOF'
-use arc_web::ArcApp;
+use arc_web::{ArcApp, ProjectorReg, helpers::{config::DatabaseDriver, es_stack}};
+use arc_core::{aggregate::Aggregate, projection::Projector};
+#[allow(dead_code)]
+fn compatibility<A: Aggregate>(stack: es_stack::SharedStack<A>, projector: Box<dyn Projector>) {
+    let _: arc_stack::SharedStack<A> = stack;
+    let _: arc_stack::ProjectorReg = ProjectorReg { projector, view: "view".into() };
+    let _: arc_stack::config::DatabaseDriver = DatabaseDriver::Sqlite;
+    let _ = es_stack::build::<A>;
+    let _ = es_stack::build_with_driver::<A>;
+}
 
 fn main() {
     let _ = ArcApp;
+    let _: Option<ProjectorReg> = None;
+    let _ = DatabaseDriver::Sqlite;
+    let _ = arc_web::helpers::es_stack::build_stores;
 }
 EOF
 

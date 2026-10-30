@@ -58,22 +58,7 @@ pub struct AppState {
     pub app_name: Mutex<String>,
 }
 
-/// A read-model projector plus the view (table) it maintains. Applications
-/// register these against their aggregate so the framework can drive
-/// synchronous, read-after-write projections in single-process mode.
-pub struct ProjectorReg {
-    pub projector: Box<dyn Projector>,
-    pub view: String,
-}
-
-impl ProjectorReg {
-    pub fn new(projector: impl Projector + 'static, view: impl Into<String>) -> Self {
-        Self {
-            projector: Box::new(projector),
-            view: view.into(),
-        }
-    }
-}
+pub use arc_stack::ProjectorReg;
 
 /// Entry point to the framework. Applications register one or more aggregate
 /// types, their projectors, and routes, then drive the result with

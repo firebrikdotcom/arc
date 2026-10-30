@@ -74,10 +74,11 @@ Next, follow a complete request through [Application Workflows](workflows.md).
 
 ## Sharing one stack with other adapters
 
-Build a stack once and share its handles with the HTTP server and other adapters. The caller must rebuild projections before serving; Arc does not rebuild a supplied stack or accept separate projector or snapshot configuration for it.
+Build a stack once with the headless `arc-stack` crate and share its handles with the HTTP server and other adapters. The caller must rebuild projections before serving; Arc does not rebuild a supplied stack or accept separate projector or snapshot configuration for it.
 
 ```rust,ignore
-use arc_web::{ArcApp, helpers::{config::DatabaseDriver, es_stack}};
+use arc_stack::{config::DatabaseDriver, es_stack};
+use arc_web::ArcApp;
 
 let stack: es_stack::SharedStack<ProductAggregate> = es_stack::build_with_driver(
     DatabaseDriver::Sqlite, database_url, projectors, snapshot_policy,
@@ -88,3 +89,5 @@ let app = ArcApp::builder()
     .register_routes(product_routes);
 // Other adapters can use stack.command_bus and stack.read_model_store.
 ```
+
+The existing `arc_web::helpers::es_stack` and `arc_web::helpers::config::DatabaseDriver` paths remain available as re-exports of the same types and functions.

@@ -55,9 +55,10 @@ installation and void the upgrade promise.
 
 - `crates/arc-core`, `crates/arc-es-sqlite`, `crates/arc-es-postgres`, `crates/arc-es-nats`
   (published crates — the supported way to consume them is by version, not by editing sources).
+- `crates/arc-stack` — headless event-sourced stack assembly, shared by all adapters.
 - `crates/arc-web` — reusable framework web/runtime crate (Actix bootstrap, middleware, session
-  and JWT helpers, CLI commands, base server wiring, websocket transport, and the generic
-  event-sourced stack `EsStack<A>`). Generic over the application's aggregate: it ships
+  and JWT helpers, CLI commands, base server wiring, websocket transport, and a compatibility facade for the generic
+  event-sourced stack `EsStack<A>` in `arc-stack`). Generic over the application's aggregate: it ships
   auth/session *machinery* but no concrete domain type and no application controllers. Consumed
   by apps via `ArcApp::builder()`; not hand-edited in a user installation.
 - `scripts/generate-benthos-config.mjs` and its tests (the manifest compiler).

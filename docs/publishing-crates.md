@@ -5,11 +5,12 @@ Arc's reusable crates are published in dependency order:
 1. `arc-core`
 2. `arc-auth-core`
 3. `arc-es-sqlite`, `arc-es-postgres`, and `arc-es-nats`
-4. `arc-web`
-5. `arc-auth-db`, `arc-auth-session`, and `arc-auth-jwt`
-6. `arc-auth-admin`
-7. `arc-auth-rbac` (its packaged tests depend on `arc-auth-admin`)
-8. `arc-web-cli`
+4. `arc-stack`
+5. `arc-web`
+6. `arc-auth-db`, `arc-auth-session`, and `arc-auth-jwt`
+7. `arc-auth-admin`
+8. `arc-auth-rbac` (its packaged tests depend on `arc-auth-admin`)
+9. `arc-web-cli`
 
 The storage and NATS crates depend on `arc-core` by version, with a local `path` retained for
 workspace development. Publish or make `arc-core` available in the registry before running
@@ -18,7 +19,7 @@ workspace development. Publish or make `arc-core` available in the registry befo
 ## Preflight
 
 Run the package isolation gate first. It packages every reusable crate,
-compiles each packaged crate's tests, and compiles `arc-web` from a temporary
+compiles each packaged crate's tests, and compiles `arc-stack` and `arc-web` from temporary
 consumer outside the workspace:
 
 ```bash
@@ -51,6 +52,9 @@ cargo publish -p arc-es-sqlite
 cargo publish -p arc-es-postgres
 cargo publish -p arc-es-nats
 
+make publish-check PUBLISH_CRATES=arc-stack
+cargo publish -p arc-stack
+
 make publish-check PUBLISH_CRATES=arc-web
 cargo publish -p arc-web
 
@@ -77,6 +81,7 @@ cargo publish -p arc-auth-core --dry-run
 cargo publish -p arc-es-sqlite --dry-run
 cargo publish -p arc-es-postgres --dry-run
 cargo publish -p arc-es-nats --dry-run
+cargo publish -p arc-stack --dry-run
 cargo publish -p arc-web --dry-run
 cargo publish -p arc-web-cli --dry-run
 ```
@@ -88,7 +93,7 @@ cache.
 
 ## Public API Policy
 
-All twelve reusable crates are pre-1.0 and versioned in lockstep. Within a
+All thirteen reusable crates are pre-1.0 and versioned in lockstep. Within a
 compatible minor release line:
 
 - Keep `arc-core` traits source-compatible unless there is a documented migration.

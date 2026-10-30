@@ -650,6 +650,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "arc-stack"
+version = "0.8.11"
+dependencies = [
+ "arc-core",
+ "arc-es-postgres",
+ "arc-es-sqlite",
+ "async-trait",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "arc-swap"
 version = "1.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -672,8 +686,8 @@ dependencies = [
  "arc-auth-core",
  "arc-core",
  "arc-es-nats",
- "arc-es-postgres",
  "arc-es-sqlite",
+ "arc-stack",
  "argon2",
  "async-trait",
  "chrono",
