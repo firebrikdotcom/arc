@@ -28,6 +28,37 @@ pub struct EsStack<A: Aggregate> {
     pub projection_engine: Arc<ProjectionEngine>,
 }
 
+/// Share one constructed stack with multiple adapters. The caller owns startup
+/// projection rebuilding before making the stack available to those adapters.
+pub struct SharedStack<A: Aggregate> {
+    /// The shared command bus.
+    pub command_bus: Arc<CommandBus<A>>,
+    /// The shared projection read store.
+    pub read_model_store: Arc<dyn ReadModelStore>,
+    /// The projection engine, including the caller-owned rebuild operation.
+    pub projection_engine: Arc<ProjectionEngine>,
+}
+
+impl<A: Aggregate> Clone for SharedStack<A> {
+    fn clone(&self) -> Self {
+        Self {
+            command_bus: self.command_bus.clone(),
+            read_model_store: self.read_model_store.clone(),
+            projection_engine: self.projection_engine.clone(),
+        }
+    }
+}
+
+impl<A: Aggregate> From<EsStack<A>> for SharedStack<A> {
+    fn from(stack: EsStack<A>) -> Self {
+        Self {
+            command_bus: Arc::new(stack.command_bus),
+            read_model_store: stack.read_model_store,
+            projection_engine: stack.projection_engine,
+        }
+    }
+}
+
 /// Boxed storage seam shared by every entry point. The command bus and the
 /// projection engine each own an independent handle to the same backend so the
 /// write path and replay path do not contend on one connection wrapper.
@@ -109,7 +140,24 @@ pub async fn build<A: Aggregate>(
     projectors: Vec<ProjectorReg>,
     snapshot_policy: Option<SnapshotPolicy>,
 ) -> Result<EsStack<A>, Box<dyn std::error::Error>> {
-    let stores = build_stores(DatabaseDriver::from_env(), database_url).await?;
+    build_with_driver(
+        DatabaseDriver::from_env(),
+        database_url,
+        projectors,
+        snapshot_policy,
+    )
+    .await
+}
+
+/// Build an in-process stack using an explicitly selected database driver.
+/// The caller is responsible for rebuilding projections when required.
+pub async fn build_with_driver<A: Aggregate>(
+    driver: DatabaseDriver,
+    database_url: &str,
+    projectors: Vec<ProjectorReg>,
+    snapshot_policy: Option<SnapshotPolicy>,
+) -> Result<EsStack<A>, Box<dyn std::error::Error>> {
+    let stores = build_stores(driver, database_url).await?;
     let read_model_store = stores.read_model_store.clone();
 
     let mut engine = ProjectionEngine::new(stores.projection_event_store);

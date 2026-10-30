@@ -71,3 +71,20 @@ async fn create_product(
 The framework implementation is in [`crates/arc-core/src/command_bus.rs`](https://github.com/lotharthesavior/arc/blob/master/crates/arc-core/src/command_bus.rs). Look for `CommandBus<A>` and its `dispatch` method.
 
 Next, follow a complete request through [Application Workflows](workflows.md).
+
+## Sharing one stack with other adapters
+
+Build a stack once and share its handles with the HTTP server and other adapters. The caller must rebuild projections before serving; Arc does not rebuild a supplied stack or accept separate projector or snapshot configuration for it.
+
+```rust,ignore
+use arc_web::{ArcApp, helpers::{config::DatabaseDriver, es_stack}};
+
+let stack: es_stack::SharedStack<ProductAggregate> = es_stack::build_with_driver(
+    DatabaseDriver::Sqlite, database_url, projectors, snapshot_policy,
+).await?.into();
+stack.projection_engine.rebuild_all().await?;
+let app = ArcApp::builder()
+    .register_aggregate_with_stack::<ProductAggregate>(stack.clone())
+    .register_routes(product_routes);
+// Other adapters can use stack.command_bus and stack.read_model_store.
+```

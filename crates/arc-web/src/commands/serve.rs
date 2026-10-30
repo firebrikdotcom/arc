@@ -40,12 +40,12 @@ pub(crate) struct BuiltAggregateRuntime {
 }
 
 impl BuiltAggregateRuntime {
-    fn new<A: Aggregate + 'static>(
-        command_bus: CommandBus<A>,
+    pub(crate) fn new<A: Aggregate + 'static>(
+        command_bus: Arc<CommandBus<A>>,
         read_model_store: Arc<dyn arc_core::read_model_store::ReadModelStore>,
         projection_engine: Arc<ProjectionEngine>,
     ) -> Self {
-        let command_bus_data = web::Data::new(command_bus);
+        let command_bus_data = web::Data::from(command_bus);
         let read_model_store_data = web::Data::from(read_model_store);
         let projection_engine_data = web::Data::from(projection_engine);
 
@@ -118,7 +118,7 @@ pub(crate) async fn build_aggregate_runtime<A: Aggregate + 'static>(
     );
 
     Ok(BuiltAggregateRuntime::new(
-        command_bus,
+        Arc::new(command_bus),
         read_model_store,
         projection_engine,
     ))
@@ -444,7 +444,7 @@ mod tests {
             .await
             .unwrap();
         let command_bus = CommandBus::<A>::new(Box::new(event_store), Box::new(bus));
-        BuiltAggregateRuntime::new(command_bus, read_model_store, engine)
+        BuiltAggregateRuntime::new(Arc::new(command_bus), read_model_store, engine)
     }
 
     #[post("/products")]
