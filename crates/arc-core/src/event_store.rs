@@ -99,9 +99,9 @@ pub enum EventStoreError {
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
 
-    /// The store does not implement snapshot persistence. Callers fall back to
-    /// replaying the full event stream.
-    #[error("snapshots not supported by this store")]
+    /// The store does not implement an optional capability such as snapshot
+    /// persistence or exact-event lookup.
+    #[error("operation is not supported by this store")]
     Unsupported,
 
     #[error("Event store error: {message}")]
@@ -196,6 +196,21 @@ pub trait EventStore: Send + Sync {
     ) -> EventStoreResult<Vec<Event>> {
         let _ = aggregate_type;
         self.load(aggregate_id).await
+    }
+
+    /// Load one persisted event by its complete stream identity.
+    ///
+    /// The default returns [`EventStoreError::Unsupported`] so implementations
+    /// that do not provide bounded exact-event lookup fail closed instead of
+    /// falling back to an unbounded stream read.
+    async fn load_event(
+        &self,
+        aggregate_type: &str,
+        aggregate_id: &str,
+        sequence: i64,
+    ) -> EventStoreResult<Option<Event>> {
+        let _ = (aggregate_type, aggregate_id, sequence);
+        Err(EventStoreError::Unsupported)
     }
 
     async fn load_from(
@@ -313,7 +328,12 @@ mod in_memory {
                 }
             }
 
-            store.extend(events);
+            // Match the SQL stores, which persist whole seconds.
+            store.extend(
+                events
+                    .into_iter()
+                    .map(Event::with_stored_timestamp_precision),
+            );
             Ok(())
         }
 
@@ -345,7 +365,12 @@ mod in_memory {
                 }
             }
 
-            store.extend(events);
+            // Match the SQL stores, which persist whole seconds.
+            store.extend(
+                events
+                    .into_iter()
+                    .map(Event::with_stored_timestamp_precision),
+            );
             Ok(())
         }
 
@@ -371,6 +396,23 @@ mod in_memory {
                 })
                 .cloned()
                 .collect())
+        }
+
+        async fn load_event(
+            &self,
+            aggregate_type: &str,
+            aggregate_id: &str,
+            sequence: i64,
+        ) -> EventStoreResult<Option<Event>> {
+            let store = self.events.lock().await;
+            Ok(store
+                .iter()
+                .find(|event| {
+                    event.aggregate_type == aggregate_type
+                        && event.aggregate_id == aggregate_id
+                        && event.sequence == sequence
+                })
+                .cloned())
         }
 
         async fn load_from(
@@ -570,11 +612,18 @@ mod tests {
         })
         .with_audit(AuditMetadata::test_default());
         store
-            .append("u1", VersionCheck::New, vec![e])
+            .append("u1", VersionCheck::New, vec![e.clone()])
             .await
             .unwrap();
         let loaded = store.load("u1").await.unwrap();
         assert_eq!(loaded.len(), 1);
+        // Like the SQL stores, the in-memory store keeps whole seconds.
+        assert_eq!(
+            store.load_event("User", "u1", 1).await.unwrap(),
+            Some(e.with_stored_timestamp_precision())
+        );
+        assert_eq!(store.load_event("Order", "u1", 1).await.unwrap(), None);
+        assert_eq!(store.load_event("User", "u1", 2).await.unwrap(), None);
     }
 
     #[tokio::test]

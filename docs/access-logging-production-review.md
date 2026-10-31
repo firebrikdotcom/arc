@@ -90,6 +90,9 @@ geographic storage, erasure/legal-hold conflicts, and treatment of backups must 
 decided by the organization. This review sets no retention period and makes no
 compliance claim. Apply approved policies consistently to primary storage, replicas,
 archives, incident exports and backups; test their enforcement before relying on it.
+The [deployment audit policy conversation plan](deployment-audit-policy-plan.md)
+organizes the outstanding owner decisions and synthetic evidence checks; it does
+not approve a policy or deployment configuration.
 
 ## Verification scope
 
@@ -101,7 +104,7 @@ default `status_code()` (500) even when its custom `error_response()` emits 503.
 Consumers inspecting that trait method directly should not infer the wire status.
 This pre-existing general error-API inconsistency is outside the bounded wrapper fix.
 Exact commands and results
-are recorded in `/tmp/nineties-access-log-review-report.md` for this lane.
+are recorded in `/tmp/arc-access-log-review-report.md` for this lane.
 
 ## Durable implementation update — 2026-09-14
 
@@ -204,6 +207,6 @@ fixture, and removes its labeled containers on exit. Override
 needed. The runner builds its verifier from the checked-in Dockerfile (Rust 1.90
 and native SQLite/OpenSSL dependencies) and uses Cargo `--locked`; no private
 prebuilt image is required. The default cache is the checkout’s `target/verification-cache` on disk.
-Port 18784 must be free. Test receipts are written to
-`/tmp/arc-nineties-durable-audit-receipt.json` (override
-`ARC_AUDIT_RECEIPT` for another lane).
+Port 18784 must be free. Test receipts are written to a private temporary
+directory created per run with `mktemp -d` and removed afterwards (set
+`ARC_AUDIT_RECEIPT` to keep a receipt at a path you choose).

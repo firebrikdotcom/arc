@@ -2,7 +2,7 @@ use actix_web::{post, web, HttpRequest, HttpResponse, Responder};
 use arc_core::event::Event;
 #[cfg(test)]
 use arc_core::event::NewEvent;
-use arc_core::projection::ProjectionEngine;
+use arc_core::projection::{ExternalProjectionError, ProjectionEngine};
 use serde_json::json;
 
 fn configured_token() -> Option<String> {
@@ -50,9 +50,17 @@ pub async fn handle_user_projection(
             .json(json!({"error": "Projection endpoint only accepts User events"}));
     }
 
-    match projection_engine.process(&event).await {
+    match projection_engine.process_external_delivery(&event).await {
         Ok(()) => HttpResponse::NoContent().finish(),
-        Err(error) => {
+        Err(ExternalProjectionError::MissingEvent | ExternalProjectionError::EventMismatch) => {
+            HttpResponse::BadRequest().json(json!({"error": "Invalid event"}))
+        }
+        Err(ExternalProjectionError::EventStore(error)) => {
+            tracing::error!(error = %error, event_id = %event.event_id, "authoritative projection event lookup failed");
+            HttpResponse::ServiceUnavailable()
+                .json(json!({"error": "Projection handler is unavailable"}))
+        }
+        Err(ExternalProjectionError::Projection(error)) => {
             tracing::error!(error = ?error, event_id = %event.event_id, event_type = event.event_type, "user projection failed");
             HttpResponse::InternalServerError().json(json!({"error": "Projection failed"}))
         }
@@ -65,7 +73,9 @@ mod tests {
     use crate::domain::user::projector::{UserProjector, USERS_VIEW};
     use actix_web::{http::StatusCode, test, App};
     use arc_core::audit::AuditMetadata;
-    use arc_core::event_store::{EventStore, EventStoreError, EventStoreResult, VersionCheck};
+    use arc_core::event_store::{
+        EventStore, EventStoreError, EventStoreResult, InMemoryEventStore, VersionCheck,
+    };
     use arc_core::read_model_store::{InMemoryReadModelStore, ReadModelStore};
     use arc_core::snapshot::Snapshot;
     use async_trait::async_trait;
@@ -131,12 +141,15 @@ mod tests {
             }),
         })
         .with_audit(AuditMetadata::test_default())
+        // CommandBus stores and publishes whole-second timestamps.
+        .with_stored_timestamp_precision()
     }
 
     fn build_projection_engine(
+        event_store: Box<dyn EventStore>,
         read_model_store: Arc<dyn ReadModelStore>,
     ) -> web::Data<ProjectionEngine> {
-        let mut engine = ProjectionEngine::new(Box::new(EmptyEventStore));
+        let mut engine = ProjectionEngine::new(event_store);
         engine.register_projector(Box::new(UserProjector::new()), read_model_store, USERS_VIEW);
         web::Data::new(engine)
     }
@@ -148,7 +161,7 @@ mod tests {
         let store: Arc<dyn ReadModelStore> = Arc::new(InMemoryReadModelStore::new());
         let app = test::init_service(
             App::new()
-                .app_data(build_projection_engine(store))
+                .app_data(build_projection_engine(Box::new(EmptyEventStore), store))
                 .service(handle_user_projection),
         )
         .await;
@@ -169,7 +182,7 @@ mod tests {
         let store: Arc<dyn ReadModelStore> = Arc::new(InMemoryReadModelStore::new());
         let app = test::init_service(
             App::new()
-                .app_data(build_projection_engine(store))
+                .app_data(build_projection_engine(Box::new(EmptyEventStore), store))
                 .service(handle_user_projection),
         )
         .await;
@@ -186,17 +199,57 @@ mod tests {
 
     #[actix_web::test]
     #[serial]
-    async fn projects_user_event_through_arc_owned_read_model_store() {
+    async fn rejects_projection_when_store_does_not_support_exact_lookup() {
         std::env::set_var("INTERNAL_PROJECTION_TOKEN", "test-token");
-        let store: Arc<dyn ReadModelStore> = Arc::new(InMemoryReadModelStore::new());
+        let models: Arc<dyn ReadModelStore> = Arc::new(InMemoryReadModelStore::new());
         let app = test::init_service(
             App::new()
-                .app_data(build_projection_engine(store.clone()))
+                .app_data(build_projection_engine(
+                    Box::new(EmptyEventStore),
+                    models.clone(),
+                ))
                 .service(handle_user_projection),
         )
         .await;
 
+        let req = test::TestRequest::post()
+            .uri("/users/handle")
+            .insert_header(("Authorization", "Bearer test-token"))
+            .set_json(test_event())
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(models.get(USERS_VIEW, "user-123").await.unwrap().is_none());
+        std::env::remove_var("INTERNAL_PROJECTION_TOKEN");
+    }
+
+    #[actix_web::test]
+    #[serial]
+    async fn projects_user_event_through_arc_owned_read_model_store() {
+        std::env::set_var("INTERNAL_PROJECTION_TOKEN", "test-token");
+        let store: Arc<dyn ReadModelStore> = Arc::new(InMemoryReadModelStore::new());
+        let event_store = InMemoryEventStore::new();
         let event = test_event();
+        event_store
+            .append_to(
+                "User",
+                &event.aggregate_id,
+                VersionCheck::New,
+                vec![event.clone()],
+            )
+            .await
+            .expect("authoritative event append");
+        let app = test::init_service(
+            App::new()
+                .app_data(build_projection_engine(
+                    Box::new(event_store),
+                    store.clone(),
+                ))
+                .service(handle_user_projection),
+        )
+        .await;
+
         let req = test::TestRequest::post()
             .uri("/users/handle")
             .insert_header(("Authorization", "Bearer test-token"))

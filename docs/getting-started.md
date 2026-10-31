@@ -8,6 +8,10 @@ Create a self-contained application without cloning the Arc repository.
 - `make`
 - SQLite development libraries
 
+To create a native Android app, follow [Your first Android app](android.md).
+That guide covers the verified scaffold, FFI resource generation, emulator
+acceptance, and explicit in-place deployment.
+
 ## 1. Install the generator
 
 ```bash
@@ -46,6 +50,9 @@ Server-rendered UI with Tera views and browser assets:
 ```bash
 arc new my-app --ui
 ```
+
+`--ui` creates a web UI for the generated web application. The Android app uses
+the native FFI adapter; web UIs are for web deployments.
 
 Arc initializes a Git repository by default without creating a commit. Pass `--no-git` to skip it.
 

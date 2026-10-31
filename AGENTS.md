@@ -2,6 +2,8 @@
 
 ## Feedback Log
 
+- **Keep deployment audit policy open while technical Phase 2 proceeds.** (2026-10-23) Prepare a document that structures the owner conversation about deployment audit policy; do not invent defaults or mark approval. Continue the technical Phase 2 fixes while that decision remains pending.
+
 - **Documentation and roadmap must identify v0.8.6 as released, and describe Benthos routing/generation as implemented and tested; CI must prevent this documentation drift.** (2026-09-08)
 - **Tag and push the validated CI/CD repair as the next patch release.** (2026-09-08) Use a versioned release tag after the manual CI, Security, and Release dry-run validations have passed.
 - **Manually trigger GitHub CI and Security to confirm repaired workflows; treat Release separately because dispatching it creates a real release.** (2026-09-08) Run non-publishing checks safely on master, and require a deliberate version/tag decision before a release dispatch.
@@ -22,11 +24,13 @@ Operational guide for agents working in this repository. Keep changes aligned wi
 
 ## Current State
 
-- Rust workspace with five active crates:
+- Rust workspace with active crates including:
   - `crates/arc-core`: event sourcing primitives, aggregates, command bus, event bus traits, projections, read-model traits, audit/access/session/integrity primitives.
   - `crates/arc-es-sqlite`: SQLite event store, read-model store, snapshot persistence, and JWT session revocation store.
   - `crates/arc-es-postgres`: Postgres event store, read-model store, and snapshot persistence (self-initializing schema).
   - `crates/arc-es-nats`: NATS JetStream `EventBus` implementation (the publish side).
+  - `crates/arc-stack`: headless event-sourced stack assembly shared by adapters.
+  - `crates/arc-ffi`: native async runtime and shared core registry for UniFFI consumers.
   - `crates/arc-app`: Actix Web application, Tera templates, Vite assets, auth, API/admin routes, user domain wiring.
 - Backend framework: Actix Web.
 - Write model: command handlers and aggregates through `CommandBus`.
@@ -36,7 +40,7 @@ Operational guide for agents working in this repository. Keep changes aligned wi
 - Auth modes:
   - Session/cookie auth for HTML/admin routes.
   - JWT bearer auth for `/api/*`.
-- Realtime: WebSocket support under `crates/arc-app/src/websocket/`.
+- Realtime: WebSocket support lives in `arc-web`; the reference app no longer mounts `/ws`.
 - Distributed event lane: `arc-es-nats` publishes persisted events to NATS JetStream; **Benthos (Redpanda Connect)** is the single routing and event-handler delivery layer that consumes `events.>`. See `docs/architecture-decisions/0001-benthos-only-event-routing.md` and `docs/event-handlers.md`. (The earlier `arc-worker` consumer crate has been removed; treat any reference to it as historical.)
 
 Important: older planning docs can lag behind code. If docs conflict, prefer current source and the source-of-truth order below.
@@ -53,7 +57,7 @@ Important: older planning docs can lag behind code. If docs conflict, prefer cur
 - `crates/arc-app/src/routes.rs`: HTML/API/admin scopes, static asset serving, middleware wiring.
 - `crates/arc-app/src/http/controllers/`: HTTP handlers.
 - `crates/arc-app/src/http/middlewares/`: auth, JWT, idle timeout, rate limiting.
-- `crates/arc-app/src/helpers/`: sessions, CSRF, templates, forms, JWT, ES stack assembly.
+- `crates/arc-app/src/helpers/`: sessions, CSRF, templates, forms, and JWT; shared stack assembly is owned by `arc-stack` and `arc-web` retains compatibility re-exports.
 - `crates/arc-app/src/domain/user/`: User aggregate, commands, projector.
 - `crates/arc-app/src/resources/`: CSS, JS, images, Tera views.
 - `config/benthos/`: Benthos (Redpanda Connect) routing pipeline(s) that consume `events.>`.
@@ -143,7 +147,7 @@ Important: older planning docs can lag behind code. If docs conflict, prefer cur
 - Auth/profile tests can touch migrations, seeders, session middleware, CSRF behavior, and projections.
 - If you change auth, forms, migrations, projection behavior, or session behavior, update or add focused tests.
 - If you change NATS publishing behavior, cover publish acks, subject naming (`events.<aggregate_type>.<event_type>`, snake_case), and event serialization. Routing/consumer behavior lives in Benthos pipelines (`config/benthos/`), validated with `benthos lint` and routing integration tests. Projection integration tests should prove Benthos calls Arc-owned projection code; do not test or introduce Benthos SQL/database writes.
-- Docker-backed tests must use project-scoped names and labels, for example `arc-nineties-*` plus `arc.project=nineties`, and must remove their containers on every success, skip, timeout, and failure path. Never leave anonymous NATS/Benthos test containers running.
+- Docker-backed tests must use project-scoped names and labels, for example `arc-test-*` plus `arc.project=arc`, and must remove their containers on every success, skip, timeout, and failure path. Never leave anonymous NATS/Benthos test containers running.
 
 ## Current Priorities
 

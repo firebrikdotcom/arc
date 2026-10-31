@@ -4,7 +4,7 @@ services:
     image: rust:1.90-slim-bookworm
     working_dir: /work
     labels:
-      arc.project: nineties
+      arc.project: arc
       arc.lane: threat-model-coverage
     mem_limit: 4g
     cpus: 2

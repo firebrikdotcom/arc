@@ -6,7 +6,10 @@ use std::time::{Duration, Instant};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::websocket::server::{Connect, Disconnect, Subscribe, Unsubscribe, WsMessage, WsServer};
+use crate::websocket::{
+    security::{PrincipalResolutionError, WebSocketOriginAllowlist, WebSocketPrincipalProvider},
+    server::{Connect, Disconnect, Subscribe, Unsubscribe, WsMessage, WsServer},
+};
 
 /// How often heartbeat pings are sent
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
@@ -146,14 +149,78 @@ pub async fn ws_handler(
     session: Session,
     server: web::Data<Addr<WsServer>>,
 ) -> Result<HttpResponse, Error> {
-    // Pull the aggregate UUID out of the cached `SessionUser`, if any.
-    let user_id = session
-        .get::<crate::helpers::session::SessionUser>("user")
-        .ok()
-        .flatten()
-        .map(|u| u.id);
+    let origin_policy = req
+        .app_data::<web::Data<WebSocketOriginAllowlist>>()
+        .map(|policy| policy.get_ref().clone())
+        .unwrap_or_else(WebSocketOriginAllowlist::empty);
+    let origin_values = req
+        .headers()
+        .get_all(actix_web::http::header::ORIGIN)
+        .map(|value| value.to_str().unwrap_or(""));
+    if !origin_policy.allows_headers(origin_values) {
+        return Ok(HttpResponse::Forbidden().finish());
+    }
 
-    let ws_connection = WsConnection::new(user_id, server.get_ref().clone());
+    let Some(provider) = req.app_data::<web::Data<dyn WebSocketPrincipalProvider>>() else {
+        return Ok(HttpResponse::ServiceUnavailable().finish());
+    };
+    let principal = match provider.resolve(&req, &session).await {
+        Ok(Some(principal)) => principal,
+        Ok(None) => return Ok(HttpResponse::Unauthorized().finish()),
+        Err(PrincipalResolutionError::Unavailable) => {
+            return Ok(HttpResponse::ServiceUnavailable().finish())
+        }
+    };
+
+    let ws_connection = WsConnection::new(
+        Some(principal.user_id().to_owned()),
+        server.get_ref().clone(),
+    );
 
     ws::start(ws_connection, &req, stream)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_session::{storage::CookieSessionStore, SessionMiddleware};
+    use actix_web::{cookie::Key, http::StatusCode, test, App};
+
+    const ALLOWED: &str = "http://127.0.0.1:18080";
+
+    async fn handshake_status(origin: &str) -> StatusCode {
+        let origins = WebSocketOriginAllowlist::new([ALLOWED]).unwrap();
+        let app = test::init_service(
+            App::new()
+                .wrap(SessionMiddleware::new(
+                    CookieSessionStore::default(),
+                    Key::generate(),
+                ))
+                .app_data(web::Data::new(origins))
+                .app_data(web::Data::new(WsServer::new().start()))
+                .route("/ws", web::get().to(ws_handler)),
+        )
+        .await;
+        let req = test::TestRequest::get()
+            .uri("/ws")
+            .insert_header((actix_web::http::header::ORIGIN, origin))
+            .to_request();
+        test::call_service(&app, req).await.status()
+    }
+
+    #[actix_web::test]
+    async fn allowed_origin_without_a_principal_provider_is_unavailable() {
+        assert_eq!(
+            handshake_status(ALLOWED).await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+
+    #[actix_web::test]
+    async fn origin_check_runs_before_the_provider_check() {
+        assert_eq!(
+            handshake_status("http://evil.example.test").await,
+            StatusCode::FORBIDDEN
+        );
+    }
 }

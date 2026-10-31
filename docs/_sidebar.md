@@ -1,6 +1,7 @@
 * Start
   * [What Arc Is](README.md)
   * [Create an App](getting-started.md)
+  * [Your first Android app](android.md)
   * [Application Anatomy](project-structure.md)
   * [Application Workflows](workflows.md)
   * [Command Bus](command-bus.md)
@@ -9,6 +10,7 @@
   * [Add an Endpoint](endpoints.md)
   * [Build a Resource](resources.md)
   * [Add a UI Page](ui.md)
+  * [Native Adapters](ffi.md)
   * [Configuration](configuration.md)
   * [Testing](testing.md)
 
@@ -26,6 +28,7 @@
   * [Threat Model](threat-model.md)
   * [Release Security Checklist](release-security-checklist.md)
   * [Security Test Coverage](security-test-coverage.md)
+  * [WebSocket Security](websocket-security.md)
   * [Audit Metadata](audit-metadata.md)
   * [Access Logging](access-logging.md)
   * [Idle Timeout](idle-timeout.md)
@@ -43,6 +46,8 @@
 * Architecture Decisions
   * [ADR 0001: Benthos Routing](architecture-decisions/0001-benthos-only-event-routing.md)
   * [ADR 0002: Upgrade Contract](architecture-decisions/0002-framework-upgrade-contract.md)
+  * [ADR 0003: Shared Stack UI Adapters](architecture-decisions/0003-shared-stack-ui-adapters.md)
+  * [ADR 0004: Android Scaffold](architecture-decisions/0004-android-scaffold.md)
 
 * Help
   * [Troubleshooting](troubleshooting.md)

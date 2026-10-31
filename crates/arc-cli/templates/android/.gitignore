@@ -1,0 +1,9 @@
+/.gradle/
+/build/
+/app/build/
+/rust/target/
+/tools/uniffi-bindgen/target/
+/local.properties
+*.sqlite
+*.sqlite-*
+/.arc-resource-stage-*/

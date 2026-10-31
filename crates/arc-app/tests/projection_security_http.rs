@@ -1,4 +1,4 @@
-//! Actual HTTP projection boundary and duplicate delivery; forged-event acceptance is an OPEN GAP.
+//! Actual HTTP projection boundary rejects unpersisted and modified event envelopes.
 #[path = "support/env_guard.rs"]
 mod env_guard;
 use actix_web::{web, App, HttpServer};
@@ -7,7 +7,7 @@ use arc::http::controllers::internal_projection_controller::handle_user_projecti
 use arc_core::{
     audit::AuditMetadata,
     event::{Event, NewEvent},
-    event_store::InMemoryEventStore,
+    event_store::{EventStore, InMemoryEventStore, VersionCheck},
     projection::ProjectionEngine,
     read_model_store::{InMemoryReadModelStore, ReadModelStore},
 };
@@ -17,11 +17,11 @@ use std::{
 };
 
 #[actix_web::test]
-async fn projection_credentials_duplicates_and_forgery_gap() {
+async fn projection_requires_persisted_unchanged_event_and_is_idempotent() {
     let _env = env_guard::EnvGuard::new(&[("INTERNAL_PROJECTION_TOKEN", Some("fixture-token"))]);
     let models: Arc<dyn ReadModelStore> = Arc::new(InMemoryReadModelStore::new());
-    // Empty authoritative store: the submitted event cannot possibly be persisted.
-    let mut engine = ProjectionEngine::new(Box::new(InMemoryEventStore::new()));
+    let event_store = InMemoryEventStore::new();
+    let mut engine = ProjectionEngine::new(Box::new(event_store.clone()));
     engine.register_projector(Box::new(UserProjector::new()), models.clone(), USERS_VIEW);
     let engine = web::Data::new(engine);
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -37,35 +37,47 @@ async fn projection_credentials_duplicates_and_forgery_gap() {
     .run();
     let handle = server.handle();
     actix_web::rt::spawn(server);
-    let event = Event::new(NewEvent { aggregate_type: "User", aggregate_id: "forged", sequence: 1, event_type: "UserRegistered", payload: serde_json::json!({"name":"Forged", "email":"forged@example.test", "password_hash":"fake"}) }).with_audit(AuditMetadata::test_default());
+    let event = Event::new(NewEvent { aggregate_type: "User", aggregate_id: "persisted", sequence: 1, event_type: "UserRegistered", payload: serde_json::json!({"name":"Ada", "email":"ada@example.test", "password_hash":"persisted-hash"}) }).with_audit(AuditMetadata::test_default()).with_stored_timestamp_precision();
+    event_store
+        .append_to(
+            "User",
+            &event.aggregate_id,
+            VersionCheck::New,
+            vec![event.clone()],
+        )
+        .await
+        .unwrap();
+    let mut forged = event.clone();
+    forged.aggregate_id = "forged".to_string();
+    let mut tampered = event.clone();
+    tampered.payload["email"] = serde_json::json!("attacker@example.test");
+    let mut timestamp_tampered = event.clone();
+    timestamp_tampered.timestamp += 1;
+    let mut metadata_tampered = event.clone();
+    metadata_tampered.audit.actor_id = "attacker".to_string();
     for credential in ["", "Bearer wrong", "Basic fixture-token"] {
         let response = post(addr, credential, &event).await;
         assert!(response.starts_with("HTTP/1.1 401"), "{response}");
+        assert!(models.get(USERS_VIEW, "persisted").await.unwrap().is_none());
+    }
+    for submitted in [&forged, &tampered, &timestamp_tampered, &metadata_tampered] {
+        let response = post(addr, "Bearer fixture-token", submitted).await;
+        assert!(response.starts_with("HTTP/1.1 400"), "{response}");
+        assert!(models.get(USERS_VIEW, "persisted").await.unwrap().is_none());
         assert!(models.get(USERS_VIEW, "forged").await.unwrap().is_none());
     }
     let first = post(addr, "Bearer fixture-token", &event).await;
-    let first_row = models.get(USERS_VIEW, "forged").await.unwrap();
+    assert!(first.starts_with("HTTP/1.1 204"), "{first}");
+    let first_row = models.get(USERS_VIEW, "persisted").await.unwrap();
     let second = post(addr, "Bearer fixture-token", &event).await;
-    let second_row = models.get(USERS_VIEW, "forged").await.unwrap();
+    assert!(second.starts_with("HTTP/1.1 204"), "{second}");
+    let second_row = models.get(USERS_VIEW, "persisted").await.unwrap();
     handle.stop(true).await;
-    if std::env::var("ARC_SECURITY_CONTRACTS").as_deref() == Ok("1") {
-        assert!(
-            first.starts_with("HTTP/1.1 4") && first_row.is_none(),
-            "OPEN GAP: forged event accepted with valid bearer: {first}"
-        );
-    } else {
-        assert!(first.starts_with("HTTP/1.1 204"), "{first}");
-        assert!(second.starts_with("HTTP/1.1 204"), "{second}");
-        assert_eq!(
-            first_row, second_row,
-            "duplicate delivery must not change projection state"
-        );
-        assert_eq!(
-            second_row.unwrap()["email"],
-            "forged@example.test",
-            "OPEN GAP reproduction: bearer holder can inject unpersisted event"
-        );
-    }
+    assert_eq!(
+        first_row, second_row,
+        "duplicate delivery must not change projection state"
+    );
+    assert_eq!(second_row.unwrap()["email"], "ada@example.test");
 }
 async fn post(addr: std::net::SocketAddr, authorization: &str, event: &Event) -> String {
     let body = serde_json::to_string(event).unwrap();

@@ -1,0 +1,16 @@
+[package]
+name = "arc-ffi-native-app"
+version = "0.1.0"
+edition = "2021"
+publish = false
+[lib]
+crate-type = ["cdylib"]
+[workspace]
+[dependencies]
+arc-ffi = { path = "../../.." }
+arc-core = { path = "../../../../arc-core" }
+arc-stack = { path = "../../../../arc-stack", default-features = false }
+uniffi = { version = "=0.32.2", default-features = false }
+async-trait = "0.1"
+serde_json = "1"
+sqlx = { version = "0.8.6", default-features = false, features = ["sqlite", "runtime-tokio-rustls"] }

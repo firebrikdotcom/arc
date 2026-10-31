@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-project="arc-nineties-security-${$}"
+project="arc-test-security-${$}"
 compose=(docker compose -p "$project" -f tests/security/compose.yml)
 cleanup() { "${compose[@]}" down --remove-orphans; }
 trap cleanup EXIT

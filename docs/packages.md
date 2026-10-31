@@ -9,7 +9,9 @@ directly from its tag:
 cargo install --git https://github.com/firebrikdotcom/arc --tag v0.8.11 arc-web-cli --locked --force
 ```
 
-All twelve matching 0.8.11 packages are published to crates.io. Generated
+All twelve matching 0.8.11 packages are published to crates.io. The newly added
+`arc-stack` and `arc-ffi` packages are source-only 0.9.0 candidates and are not
+published; no release has been authorized. Generated
 applications resolve the same framework and authentication-plugin versions.
 Version 0.8.10 adds
 command-specific, read-only CLI help, and all twelve 0.8.10 packages are published
@@ -27,6 +29,8 @@ Generated applications use published crates; they do not depend on an Arc reposi
 |---|---|
 | `arc-web-cli` | Installs the `arc` generator command |
 | `arc-core` | Commands, aggregates, events, command bus, projections, read models |
+| `arc-stack` | Headless stack assembly (source addition, unpublished) |
+| `arc-ffi` | Async native adapter runtime and shared core registry (source addition, unpublished; see [Native Adapters](ffi.md)) |
 | `arc-web` | Actix runtime, server builder, middleware, and application wiring |
 | `arc-es-sqlite` | SQLite event, read-model, snapshot, and session stores |
 | `arc-es-postgres` | Optional Postgres stores |

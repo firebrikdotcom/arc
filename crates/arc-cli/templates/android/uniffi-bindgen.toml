@@ -1,0 +1,10 @@
+[crates.{{crate-name}}.bindings.kotlin]
+package_name = "uniffi.{{crate-name}}"
+cdylib_name = "{{crate-name}}"
+
+[crates.{{crate-name}}.bindings.kotlin.external_packages]
+arc_ffi = "uniffi.arc_ffi"
+
+[crates.arc_ffi.bindings.kotlin]
+package_name = "uniffi.arc_ffi"
+cdylib_name = "{{crate-name}}"

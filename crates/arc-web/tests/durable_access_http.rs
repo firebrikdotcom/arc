@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 #[actix_web::test]
 async fn durable_sink_failure_never_releases_phi_and_recovers() {
-    let path = std::env::temp_dir().join(format!("arc-nineties-http-audit-{}.db", Uuid::new_v4()));
+    let path = std::env::temp_dir().join(format!("arc-test-http-audit-{}.db", Uuid::new_v4()));
     struct Cleanup(std::path::PathBuf);
     impl Drop for Cleanup {
         fn drop(&mut self) {

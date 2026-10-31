@@ -8,4 +8,4 @@ target
 .e2e-state.json
 playwright-report/
 test-results/
-database/database-e2e.sqlite*
+database/database-e2e.sqlite*__pycache__/

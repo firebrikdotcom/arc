@@ -58,22 +58,7 @@ pub struct AppState {
     pub app_name: Mutex<String>,
 }
 
-/// A read-model projector plus the view (table) it maintains. Applications
-/// register these against their aggregate so the framework can drive
-/// synchronous, read-after-write projections in single-process mode.
-pub struct ProjectorReg {
-    pub projector: Box<dyn Projector>,
-    pub view: String,
-}
-
-impl ProjectorReg {
-    pub fn new(projector: impl Projector + 'static, view: impl Into<String>) -> Self {
-        Self {
-            projector: Box::new(projector),
-            view: view.into(),
-        }
-    }
-}
+pub use arc_stack::ProjectorReg;
 
 /// Entry point to the framework. Applications register one or more aggregate
 /// types, their projectors, and routes, then drive the result with
@@ -112,6 +97,7 @@ struct AggregateRegistration {
     projectors: Vec<ProjectorReg>,
     snapshot_policy: Option<SnapshotPolicy>,
     build: Box<AggregateBuildFn>,
+    supplied_stack: bool,
 }
 
 impl AggregateRegistration {
@@ -121,6 +107,7 @@ impl AggregateRegistration {
             aggregate_type: A::aggregate_type(),
             projectors: Vec::new(),
             snapshot_policy: None,
+            supplied_stack: false,
             build: Box::new(|projectors, snapshot_policy| {
                 Box::pin(commands::serve::build_aggregate_runtime::<A>(
                     projectors,
@@ -206,6 +193,50 @@ impl ArcAppBuilder {
         self
     }
 
+    /// Register a caller-built stack for this aggregate, sharing its handles
+    /// with HTTP handlers. The caller must rebuild projections at startup.
+    /// Projectors and snapshot policy must be configured when building the stack.
+    ///
+    /// A supplied stack uses the in-process event bus only. When `EVENT_BUS`
+    /// selects anything else (for example `EVENT_BUS=nats`), [`Self::serve`]
+    /// fails before binding with an `InvalidInput` error naming the aggregate
+    /// and the variable; use [`Self::register_aggregate`] for a NATS deployment.
+    ///
+    /// The stack and `DATABASE_URL`/`DATABASE_DRIVER` must name the same
+    /// database: the server's health check and its SQLite session store still
+    /// read those variables, not the database the stack was built on.
+    pub fn register_aggregate_with_stack<A: Aggregate + 'static>(
+        mut self,
+        stack: helpers::es_stack::SharedStack<A>,
+    ) -> Self {
+        assert!(
+            !self
+                .aggregates
+                .iter()
+                .any(|registration| registration.type_id == TypeId::of::<A>()),
+            "aggregate type {} is already registered",
+            A::aggregate_type()
+        );
+        self.aggregates.push(AggregateRegistration {
+            type_id: TypeId::of::<A>(),
+            aggregate_type: A::aggregate_type(),
+            projectors: Vec::new(),
+            snapshot_policy: None,
+            supplied_stack: true,
+            build: Box::new(move |_, _| {
+                Box::pin(async move {
+                    commands::serve::ensure_supplied_stack_event_bus(A::aggregate_type())?;
+                    Ok(commands::serve::BuiltAggregateRuntime::new(
+                        stack.command_bus,
+                        stack.read_model_store,
+                        stack.projection_engine,
+                    ))
+                })
+            }),
+        });
+        self
+    }
+
     /// Register all projectors for the most recently registered aggregate.
     pub fn register_projectors(mut self, projectors: Vec<ProjectorReg>) -> Self {
         self.current_aggregate_mut().projectors.extend(projectors);
@@ -281,11 +312,13 @@ impl ArcAppBuilder {
     }
 
     fn current_aggregate_mut(&mut self) -> &mut AggregateRegistration {
-        self.aggregates.last_mut().unwrap_or_else(|| {
+        let registration = self.aggregates.last_mut().unwrap_or_else(|| {
             panic!(
                 "register_aggregate::<A>() must be called before registering projectors or a snapshot policy"
             )
-        })
+        });
+        assert!(!registration.supplied_stack, "projectors and snapshot policy cannot be configured on a supplied stack; configure them when building it");
+        registration
     }
 
     /// Boot the HTTP server with every registered aggregate and the

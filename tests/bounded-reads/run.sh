@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-project="arc-nineties-bounded-${$}"
+project="arc-test-bounded-${$}"
 compose_file="${ARC_BOUNDED_COMPOSE_FILE:-tests/bounded-reads/compose.yml}"
 compose=(docker compose -p "$project" -f "$compose_file")
 cleanup() { "${compose[@]}" down --volumes --remove-orphans; }

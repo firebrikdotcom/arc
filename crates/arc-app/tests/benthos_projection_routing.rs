@@ -4,7 +4,7 @@ use arc::http::controllers::internal_projection_controller::handle_user_projecti
 use arc_core::audit::AuditMetadata;
 use arc_core::event::{Event, NewEvent};
 use arc_core::event_bus::EventBus;
-use arc_core::event_store::InMemoryEventStore;
+use arc_core::event_store::{EventStore, InMemoryEventStore, VersionCheck};
 use arc_core::projection::ProjectionEngine;
 use arc_core::read_model_store::{InMemoryReadModelStore, ReadModelStore};
 use arc_es_nats::NatsEventBus;
@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 type TestResult = Result<(), Box<dyn Error + Send + Sync>>;
 
-const DOCKER_PROJECT_LABEL: &str = "arc.project=nineties";
+const DOCKER_PROJECT_LABEL: &str = "arc.project=arc";
 const DOCKER_TEST_LABEL: &str = "arc.test=benthos_projection_routing";
 
 struct ChildProcess {
@@ -234,7 +234,7 @@ fn docker_image_available(image: &str) -> bool {
 }
 
 fn docker_container_name(role: &str) -> String {
-    format!("arc-nineties-{role}-{}", Uuid::new_v4().simple())
+    format!("arc-test-{role}-{}", Uuid::new_v4().simple())
 }
 
 fn remove_docker_container(container: &str) {
@@ -271,9 +271,10 @@ fn user_registered(id: &str) -> Event {
 }
 
 async fn start_projection_app(
+    event_store: InMemoryEventStore,
     read_model_store: Arc<dyn ReadModelStore>,
 ) -> Result<(String, actix_web::dev::ServerHandle), Box<dyn Error + Send + Sync>> {
-    let mut engine = ProjectionEngine::new(Box::new(InMemoryEventStore::new()));
+    let mut engine = ProjectionEngine::new(Box::new(event_store));
     engine.register_projector(Box::new(UserProjector::new()), read_model_store, USERS_VIEW);
     let engine = web::Data::new(engine);
 
@@ -450,8 +451,9 @@ async fn benthos_routes_nats_event_to_arc_projection_handler() -> TestResult {
 
     let _token = EnvVarGuard::set("INTERNAL_PROJECTION_TOKEN", "test-projection-token");
     let read_model_store: Arc<dyn ReadModelStore> = Arc::new(InMemoryReadModelStore::new());
+    let event_store = InMemoryEventStore::new();
     let (projection_url, projection_handle) =
-        start_projection_app(read_model_store.clone()).await?;
+        start_projection_app(event_store.clone(), read_model_store.clone()).await?;
     let benthos_http_port = free_port()?;
     let config_dir = generate_benthos_config(&projection_url, benthos_http_port)?;
 
@@ -461,6 +463,14 @@ async fn benthos_routes_nats_event_to_arc_projection_handler() -> TestResult {
     sleep(Duration::from_millis(500)).await;
 
     let event = user_registered("user-benthos-projection");
+    event_store
+        .append_to(
+            "User",
+            &event.aggregate_id,
+            VersionCheck::New,
+            vec![event.clone()],
+        )
+        .await?;
     bus.publish(vec![event.clone()]).await?;
 
     let row = wait_for_user_row(read_model_store.as_ref(), &event.aggregate_id).await?;

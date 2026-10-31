@@ -18,7 +18,9 @@
   <a href="https://github.com/firebrikdotcom/arc/releases">Releases</a>
 </p>
 
-Arc is a beta Rust framework for event-sourced web applications.
+Arc is a beta Rust framework for event-sourced applications with separate web
+and native UI adapters. Web UIs are for web deployments; Android uses the FFI
+adapter.
 
 It uses Actix Web, Tera, SQLite or Postgres, NATS JetStream, and Benthos. Browser routes use cookie sessions; API routes use JWT bearer authentication.
 
@@ -40,6 +42,10 @@ show package metadata, not quality certification. Arc is licensed under
 [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).
 
 ## Start a new application
+
+For a native Android project, see [Your first Android app](docs/android.md).
+The guide documents the verified CLI, toolchain requirements, emulator flow,
+and safe in-place deployment.
 
 You do not need to clone this repository. Install the generator and create a minimal application:
 
@@ -134,6 +140,8 @@ Run `make help` for the complete command list.
 ## Architecture
 
 - `arc-core`: aggregates, commands, events, projections, sessions, audit, and integrity primitives
+- `arc-stack`: headless event-sourced stack assembly shared by adapters
+- `arc-ffi`: async native adapter runtime and shared core registry (UniFFI)
 - `arc-es-sqlite`: SQLite event, read-model, snapshot, and session stores
 - `arc-es-postgres`: Postgres event, read-model, and snapshot stores
 - `arc-es-nats`: NATS JetStream event publisher
@@ -142,6 +150,11 @@ Run `make help` for the complete command list.
 - `arc-app`: application-owned domains, routes, templates, validation, and migrations
 
 Benthos is the only durable distributed event router. It consumes `events.>` and delivers to HTTP or NATS handlers; it never writes Arc databases directly.
+
+`arc-stack` owns shared stack assembly. `arc-web` is the web adapter and
+`arc-ffi` is the native adapter without web dependencies. This shared-stack
+work is a 0.9.0 candidate and has not been published. See
+[ADR 0003](docs/architecture-decisions/0003-shared-stack-ui-adapters.md).
 
 ## Documentation
 
