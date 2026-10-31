@@ -14,6 +14,7 @@ build: bindings rust
 	python3 tools/android.py assemble
 test: bindings
 	python3 tools/android.py test
+# e2e-emulator erases the app and all of its data on E2E_DEVICE: Gradle uninstalls it after the tests.
 e2e-emulator:
 	python3 tools/android.py e2e
 deploy:

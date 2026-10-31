@@ -26,9 +26,13 @@ Rust and generated Kotlin components load the same {{crate-name}} native library
 
 Resources apply embedded SQL migrations once at core open under an IMMEDIATE transaction.
 The app database is filesDir/app.sqlite. Existing data is retained; down migrations never run automatically.
-The managed .arc/android.json manifest and named registration markers support resource generation.
-Preserve generated resource ownership; customized/missing files and marker conflicts must be resolved manually.
+The managed .arc/android.json manifest records a SHA-256 hash of each generated file and block,
+and named registration markers support resource generation. Editing one resource never blocks adding another,
+and Arc never overwrites your edits; repeating a resource whose files you changed is reported as a conflict.
 
-Instrumentation is emulator-only and may alter its app test data. Physical devices are refused.
-`deploy` requires an explicit authorized connected serial, installs with -r, launches and verifies the version;
+Instrumentation is emulator-only. e2e uses the real app.sqlite and Gradle uninstalls the app afterwards,
+so it erases the app and all of its data on the selected emulator; deploy elsewhere when that data matters.
+Physical devices are refused.
+`deploy` requires an explicit authorized connected serial, installs with -r, launches and verifies the
+versionName/versionCode from app/build.gradle.kts;
 it never connects automatically, clears data, uninstalls or runs instrumentation.

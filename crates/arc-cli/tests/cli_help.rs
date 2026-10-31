@@ -349,3 +349,43 @@ fn android_option_errors_leave_tree_unchanged() {
         assert_eq!(snapshot(&sandbox.work), before, "{args:?} modified files");
     }
 }
+
+#[test]
+fn plugin_help_output_is_unchanged() {
+    const PLUGIN_ADD_HELP: &str = "Install an Arc authentication plugin
+
+Usage:
+  arc plugin add <name>
+
+Plugins:
+  auth-db-session  Browser sessions, administration and RBAC
+  auth-db-jwt      JWT APIs and RBAC
+  auth-db          Database identity provider
+  auth-session     Browser session authentication
+  auth-admin       User and role administration
+  auth-jwt         JWT API authentication
+  auth-rbac        Role-based access control
+
+Options:
+  -h, --help  Show help
+
+Run from the root of an application created by `arc new`.
+";
+    let sandbox = Sandbox::new();
+    for args in [
+        vec!["plugin", "add", "--help"],
+        vec!["plugin", "add", "-h"],
+        vec!["plugin", "add", "auth-db", "--help"],
+    ] {
+        let output = Command::new(&sandbox.cli)
+            .args(&args)
+            .current_dir(&sandbox.work)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{args:?}: {output:?}");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(stdout, PLUGIN_ADD_HELP, "{args:?}");
+        assert!(!stdout.contains("arc doctor"), "{args:?}: {stdout}");
+        assert!(output.stderr.is_empty(), "{output:?}");
+    }
+}

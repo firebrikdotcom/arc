@@ -262,8 +262,7 @@ fn print_requested_help(args: &[String]) -> Result<bool, String> {
         },
         Some("plugin") => match subcommand {
             None => println!("Manage Arc plugins\n\nUsage:\n  arc plugin <command>\n\nCommands:\n  add              Install an authentication plugin\n  migrate-auth-ui  Migrate a generated authentication UI host\n\nOptions:\n  -h, --help  Show help"),
-            Some("add") => println!("Install an Arc authentication plugin\n\nUsage:\n  arc doctor --android
-  arc plugin add <name>\n\nPlugins:\n  auth-db-session  Browser sessions, administration and RBAC\n  auth-db-jwt      JWT APIs and RBAC\n  auth-db          Database identity provider\n  auth-session     Browser session authentication\n  auth-admin       User and role administration\n  auth-jwt         JWT API authentication\n  auth-rbac        Role-based access control\n\nOptions:\n  -h, --help  Show help\n\nRun from the root of an application created by `arc new`."),
+            Some("add") => println!("Install an Arc authentication plugin\n\nUsage:\n  arc plugin add <name>\n\nPlugins:\n  auth-db-session  Browser sessions, administration and RBAC\n  auth-db-jwt      JWT APIs and RBAC\n  auth-db          Database identity provider\n  auth-session     Browser session authentication\n  auth-admin       User and role administration\n  auth-jwt         JWT API authentication\n  auth-rbac        Role-based access control\n\nOptions:\n  -h, --help  Show help\n\nRun from the root of an application created by `arc new`."),
             Some("migrate-auth-ui") => println!("Migrate an untouched generated UI to the authentication UI host\n\nUsage:\n  arc plugin migrate-auth-ui\n\nOptions:\n  -h, --help  Show help\n\nCustomized UI shells are refused with manual migration instructions."),
             Some(operation) => return Err(format!("unknown plugin command `{operation}`")),
         },

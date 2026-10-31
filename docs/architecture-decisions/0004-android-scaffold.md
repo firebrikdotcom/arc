@@ -61,8 +61,10 @@ package-name override.
 `README.md`, `.gitignore`, managed `.arc/android.json` manifest, Gradle build
 files and checked-in wrapper (scripts and jar), `app/`, `rust/`, and a
 host-only `tools/uniffi-bindgen/` workspace. The manifest uses
-`format_version=1` and records the Android target, original and normalized
-names, application ID, and registered resources. Rust is a standalone
+`format_version=2` and records the Android target, original and normalized
+names, application ID, SHA-256 hashes of the generated skeleton files, and
+registered resources. Format 1 manifests, which stored whole file bodies and
+no skeleton hashes, remain readable and are upgraded when a resource is added. Rust is a standalone
 workspace with `rlib` and `cdylib` outputs, domain modules, migrations and
 tests. Kotlin application sources use the generated package. Rust JNI output
 and generated UniFFI bindings stay under `app/build/`.
@@ -109,9 +111,13 @@ They expose typed CRUD operations and errors; writes are not automatically
 retried after an uncertain result. The generated chooser lists registered
 resources. Generation preflights names, normalized collisions, files and
 registration markers before writing. `.arc/android.json` records generated
-ownership. Repeating an unchanged registered resource is a no-op; conflicts
-or partial ownership are reported without overwriting user changes. There is
-no force option.
+ownership as SHA-256 hashes taken at generation time; checks compare files
+with those hashes, never with a fresh render, so template changes in later CLI
+versions do not block new resources. Adding a resource checks only its own
+targets and the shared markers, so edits to another resource's files do not
+block it and are never overwritten. Repeating an unchanged registered resource
+is a no-op; repeating one whose owned files or blocks changed is a conflict
+naming each file. There is no force option.
 
 ## Backward compatibility
 

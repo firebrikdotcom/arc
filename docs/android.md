@@ -54,11 +54,15 @@ resource project, the debug APK was about 36 MB; an empty project APK was about
 `make e2e-emulator` instruments an Android emulator only. Its default device is
 `emulator-5580`; the command checks that the selected device is a ready
 emulator before Gradle runs and refuses physical devices. To select another
-emulator, set `E2E_DEVICE` to its serial.
+emulator, set `E2E_DEVICE` to its serial. The instrumented tests use the app's
+real `app.sqlite`, and Gradle uninstalls the app after the run, so e2e erases
+the app and all of its data on the selected emulator. If that emulator's app
+data matters, deploy to a different device or emulator than the one e2e uses.
 
 `make deploy` is separate from emulator testing. It requires an explicit
 connected device serial and performs an in-place install, launch and
-package/version check. To deploy, run `make deploy DEVICE=<serial>` only for a
+package/version check against the `versionName` and `versionCode` in
+`app/build.gradle.kts`. To deploy, run `make deploy DEVICE=<serial>` only for a
 device you intend to update. Deployment does not run instrumentation, uninstall
 the app, or clear its data. Do not use `adb uninstall` or clear application
 storage as part of an update.
@@ -67,11 +71,25 @@ storage as part of an update.
 
 The project includes Rust and Kotlin source, Gradle files and wrapper, a root
 Makefile, and `.arc/android.json`. The manifest identifies the project and
-records generated resources and file ownership. Generated files can be
-updated only when their recorded contents still match. An unchanged repeated
-resource request is a no-op; missing, edited, or unregistered generated
-content is a conflict. There is no force option, and handwritten changes are
-not overwritten.
+records a SHA-256 hash of every file and registration block as Arc wrote it,
+for the project skeleton and for each resource. Ownership is checked against
+those recorded hashes, never against what a newer CLI's templates would
+render, so upgrading the CLI does not block adding resources.
+
+Adding a resource writes only its own new files, its blocks at the named
+markers in shared files, and the manifest. You can edit another resource's
+files or blocks: that does not block generating a new resource, and Arc never
+overwrites those edits. Repeating an unchanged resource request is a no-op.
+Repeating it after any of its files or blocks were edited or removed is a
+conflict that names each changed file, and nothing is written. A target that
+already exists without a registration, a missing or duplicated marker, or an
+invalid manifest is also a conflict. There is no force option.
+
+Manifests written before hashes were recorded (`format_version` 1) still work.
+Their skeleton files have no recorded hashes and are treated as unknown
+ownership: new resources can be added, and those files are never rewritten.
+The manifest is upgraded to `format_version` 2 the next time a resource is
+added.
 
 The Rust project has its own lockfile, as does the host-only UniFFI bindgen
 tool. The first Cargo command can create a missing lockfile; later commands

@@ -6,3 +6,4 @@
 /local.properties
 *.sqlite
 *.sqlite-*
+/.arc-resource-stage-*/

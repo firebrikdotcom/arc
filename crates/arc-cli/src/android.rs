@@ -9,6 +9,11 @@ pub const MANIFEST_PATH: &str = ".arc/android.json";
 const CHECKOUT_ERROR: &str =
     "ARC_PATH must identify a matching Arc checkout containing arc-core, arc-stack, and arc-ffi";
 
+/// Current manifest schema. Version 1 stored whole generated file bodies for
+/// resources and nothing for the project skeleton; version 2 stores SHA-256
+/// identities recorded at generation time. Version 1 manifests stay readable.
+pub const MANIFEST_FORMAT: u32 = 2;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AndroidManifest {
     pub format_version: u32,
@@ -16,7 +21,32 @@ pub struct AndroidManifest {
     pub name: String,
     pub crate_name: String,
     pub application_id: String,
+    /// Skeleton file identities recorded by `arc new`. `None` (format 1) means
+    /// unknown ownership: Arc never rewrites those files wholesale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files: Option<BTreeMap<String, String>>,
     pub resources: Vec<serde_json::Value>,
+}
+
+/// Identity of generated content, independent of the CLI version that renders it.
+pub fn content_hash(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(bytes);
+    let mut hex = String::with_capacity(7 + digest.len() * 2);
+    hex.push_str("sha256:");
+    for byte in digest {
+        hex.push_str(&format!("{byte:02x}"));
+    }
+    hex
+}
+
+pub fn is_content_hash(value: &str) -> bool {
+    value.strip_prefix("sha256:").is_some_and(|hex| {
+        hex.len() == 64
+            && hex
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    })
 }
 
 pub fn read_manifest(root: &Path) -> Result<Option<AndroidManifest>, String> {
@@ -30,7 +60,13 @@ pub fn read_manifest(root: &Path) -> Result<Option<AndroidManifest>, String> {
         .map_err(|error| format!("invalid {}: {error}", path.display()))?;
     let (crate_name, application_id) =
         identifiers(&manifest.name).map_err(|_| format!("invalid {}", path.display()))?;
-    if manifest.format_version != 1
+    if !(1..=MANIFEST_FORMAT).contains(&manifest.format_version)
+        || (manifest.format_version == 1 && manifest.files.is_some())
+        || manifest.files.as_ref().is_some_and(|files| {
+            files
+                .iter()
+                .any(|(path, hash)| path.is_empty() || !is_content_hash(hash))
+        })
         || manifest.target != "android"
         || manifest.crate_name != crate_name
         || manifest.application_id != application_id
@@ -117,12 +153,13 @@ pub fn create_project(
             root.display()
         ));
     }
-    let manifest = AndroidManifest {
-        format_version: 1,
+    let mut manifest = AndroidManifest {
+        format_version: MANIFEST_FORMAT,
         target: "android".into(),
         name: name.into(),
         crate_name: crate_name.clone(),
         application_id: application_id.clone(),
+        files: Some(BTreeMap::new()),
         resources: vec![],
     };
     let mut replacements = BTreeMap::from([
@@ -145,13 +182,17 @@ pub fn create_project(
     let result = (|| {
         for (path, bytes) in FILES {
             let render = |text: &str| render(text, &replacements);
-            let path = root.join(render(path));
+            let relative = render(path);
+            let path = root.join(&relative);
             fs::create_dir_all(path.parent().unwrap()).map_err(|e| e.to_string())?;
             let contents = if path.extension().is_some_and(|e| e == "jar") {
                 bytes.to_vec()
             } else {
                 render(std::str::from_utf8(bytes).map_err(|e| e.to_string())?).into_bytes()
             };
+            if let Some(files) = manifest.files.as_mut() {
+                files.insert(relative, content_hash(&contents));
+            }
             fs::write(&path, contents)
                 .map_err(|e| format!("could not write {}: {e}", path.display()))?;
         }
@@ -590,6 +631,20 @@ mod tests {
         let manifest = read_manifest(&root).unwrap().unwrap();
         assert_eq!(manifest.crate_name, "my_notes_core");
         assert!(manifest.resources.is_empty());
+        assert_eq!(manifest.format_version, MANIFEST_FORMAT);
+        let files = manifest.files.as_ref().unwrap();
+        assert_eq!(files.len(), FILES.len());
+        for path in [
+            "Makefile",
+            "gradle/wrapper/gradle-wrapper.jar",
+            "rust/src/ffi.rs",
+        ] {
+            assert_eq!(
+                files[path],
+                content_hash(&fs::read(root.join(path)).unwrap()),
+                "{path}"
+            );
+        }
         let cargo: toml::Value =
             toml::from_str(&fs::read_to_string(root.join("rust/Cargo.toml")).unwrap()).unwrap();
         for name in ["arc-core", "arc-stack", "arc-ffi"] {

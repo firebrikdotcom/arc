@@ -632,8 +632,9 @@ fn render_files(
         .collect()
 }
 
-// Store exact generated identities rather than platform-dependent hashes. Only these
-// blocks and resource-owned files are managed; surrounding application code is free.
+// Generation-time identities: SHA-256 of each owned file and block as written. They are
+// never compared with a fresh render, so later template changes do not affect existing
+// registrations. Only these blocks and files are managed; surrounding code is free.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AndroidRegistration {
@@ -909,59 +910,48 @@ fn create_android_resource(
     }
     let root = &resource.root;
     android_safe_path(root, Path::new(crate::android::MANIFEST_PATH))?;
+    let manifest_conflict = || android_conflict([crate::android::MANIFEST_PATH.into()]);
+    let legacy = manifest.format_version == 1;
     let mut records = Vec::<AndroidRegistration>::new();
     let mut occupied = std::collections::BTreeSet::new();
     let mut conflicts = Vec::new();
+    // Only the manifest structure is validated for every registration. Other resources'
+    // files are never written while adding this one, so their customizations are kept.
     for value in &manifest.resources {
-        let registration: AndroidRegistration = serde_json::from_value(value.clone())
-            .map_err(|_| android_conflict([crate::android::MANIFEST_PATH.into()]))?;
-        let registered_names = parse_name(&registration.name)
-            .map_err(|_| android_conflict([crate::android::MANIFEST_PATH.into()]))?;
+        let mut registration: AndroidRegistration =
+            serde_json::from_value(value.clone()).map_err(|_| manifest_conflict())?;
+        let registered_names = parse_name(&registration.name).map_err(|_| manifest_conflict())?;
         if registered_names.module != registration.module
             || registered_names.type_name != registration.type_name
             || registration.migration.len() != 14
             || !registration.migration.bytes().all(|b| b.is_ascii_digit())
             || !occupied.insert(registration.module.clone())
+            || !registration.files.keys().all(|path| android_relative(path))
+            || !registration.blocks.keys().all(|key| {
+                key.split_once('#')
+                    .is_some_and(|(path, marker)| android_relative(path) && !marker.is_empty())
+            })
         {
-            return Err(android_conflict([crate::android::MANIFEST_PATH.into()]));
+            return Err(manifest_conflict());
         }
-        let expected_files = android_files(&registered_names, &registration.migration, &manifest)
-            .into_iter()
-            .map(|f| (f.relative.to_string_lossy().into_owned(), f.contents))
-            .collect::<std::collections::BTreeMap<_, _>>();
-        let expected_blocks = android_blocks(&registered_names, &registration.migration, &manifest)
-            .into_iter()
-            .map(|(path, marker, block)| (format!("{path}#{marker}"), block))
-            .collect::<std::collections::BTreeMap<_, _>>();
-        if registration.files != expected_files || registration.blocks != expected_blocks {
-            return Err(android_conflict([crate::android::MANIFEST_PATH.into()]));
-        }
-        for (path, identity) in &registration.files {
-            android_safe_path(root, Path::new(path))?;
-            if fs::symlink_metadata(root.join(path)).is_err()
-                || fs::symlink_metadata(root.join(path)).is_ok_and(|s| !s.is_file())
-                || fs::read_to_string(root.join(path)).ok().as_ref() != Some(identity)
+        if legacy {
+            // Format 1 recorded whole generated bodies; their hashes are the same identity.
+            for identity in registration
+                .files
+                .values_mut()
+                .chain(registration.blocks.values_mut())
             {
-                conflicts.push(path.clone());
+                *identity = crate::android::content_hash(identity.as_bytes());
             }
-        }
-        for (key, identity) in &registration.blocks {
-            let (path, marker) = key.split_once('#').unwrap();
-            android_safe_path(root, Path::new(path))?;
-            let source = read_file(&root.join(path))?;
-            let begin = format!("// arc:begin {} {marker}", registration.module);
-            let end = format!("// arc:end {} {marker}", registration.module);
-            if source.matches(identity).count() != 1
-                || source.matches(&begin).count() != 1
-                || source.matches(&end).count() != 1
-            {
-                conflicts.push(path.into());
-            }
+        } else if !registration
+            .files
+            .values()
+            .chain(registration.blocks.values())
+            .all(|identity| crate::android::is_content_hash(identity))
+        {
+            return Err(manifest_conflict());
         }
         records.push(registration);
-    }
-    if !conflicts.is_empty() {
-        return Err(android_conflict(conflicts));
     }
     // Validate the shared seam even for an exact repeat.
     let blocks = android_blocks(names, "00000000000001", &manifest);
@@ -978,6 +968,35 @@ fn create_android_resource(
             || parse_name(&r.name).is_ok_and(|n| n.view == names.view)
     }) {
         if record.name == resource.name && record.module == names.module {
+            // An exact repeat is a no-op only while everything it owns is unchanged.
+            for (path, identity) in &record.files {
+                android_safe_path(root, Path::new(path))?;
+                let target = root.join(path);
+                if !fs::symlink_metadata(&target).is_ok_and(|m| m.is_file())
+                    || fs::read(&target)
+                        .map(|bytes| crate::android::content_hash(&bytes))
+                        .ok()
+                        .as_ref()
+                        != Some(identity)
+                {
+                    conflicts.push(path.clone());
+                }
+            }
+            for (key, identity) in &record.blocks {
+                let (path, marker) = key.split_once('#').unwrap();
+                android_safe_path(root, Path::new(path))?;
+                let source = fs::read_to_string(root.join(path)).unwrap_or_default();
+                if owned_block(&source, &record.module, marker)
+                    .map(|block| crate::android::content_hash(block.as_bytes()))
+                    .as_ref()
+                    != Some(identity)
+                {
+                    conflicts.push(format!("{path} ({} {marker} block)", record.module));
+                }
+            }
+            if !conflicts.is_empty() {
+                return Err(android_conflict(conflicts));
+            }
             return Ok(CreatedResource {
                 type_name: names.type_name.clone(),
                 files: vec![],
@@ -1039,27 +1058,35 @@ fn create_android_resource(
             .unwrap()
             .0;
         source.insert_str(at, &block);
-        identities.insert(format!("{path}#{marker}"), block);
+        identities.insert(
+            format!("{path}#{marker}"),
+            crate::android::content_hash(block.as_bytes()),
+        );
     }
-    manifest.resources.push(
-        serde_json::to_value(AndroidRegistration {
-            name: resource.name.clone(),
-            module: names.module.clone(),
-            type_name: names.type_name.clone(),
-            migration,
-            files: files
-                .iter()
-                .map(|f| {
-                    (
-                        f.relative.to_string_lossy().into_owned(),
-                        f.contents.clone(),
-                    )
-                })
-                .collect(),
-            blocks: identities,
-        })
-        .map_err(|e| e.to_string())?,
-    );
+    records.push(AndroidRegistration {
+        name: resource.name.clone(),
+        module: names.module.clone(),
+        type_name: names.type_name.clone(),
+        migration,
+        files: files
+            .iter()
+            .map(|f| {
+                (
+                    f.relative.to_string_lossy().into_owned(),
+                    crate::android::content_hash(f.contents.as_bytes()),
+                )
+            })
+            .collect(),
+        blocks: identities,
+    });
+    // Format 1 manifests are upgraded in the same atomic write; skeleton files stay
+    // without identities (unknown ownership) because none were recorded for them.
+    manifest.format_version = crate::android::MANIFEST_FORMAT;
+    manifest.resources = records
+        .iter()
+        .map(serde_json::to_value)
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
     let created = files.iter().map(|f| f.relative.clone()).collect();
     let mut writes = files;
     writes.extend(
@@ -1080,6 +1107,25 @@ fn create_android_resource(
         files: created,
         api_path: None,
     })
+}
+
+fn android_relative(path: &str) -> bool {
+    !path.is_empty()
+        && Path::new(path)
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+/// The whole-line `arc:begin`..`arc:end` block a resource owns in a shared file.
+fn owned_block<'a>(source: &'a str, module: &str, marker: &str) -> Option<&'a str> {
+    let begin = format!("// arc:begin {module} {marker}\n");
+    let end = format!("// arc:end {module} {marker}\n");
+    if source.matches(&begin).count() != 1 || source.matches(&end).count() != 1 {
+        return None;
+    }
+    let start = source.find(&begin)?;
+    let stop = source.find(&end)? + end.len();
+    (start < stop && (start == 0 || source[..start].ends_with('\n'))).then(|| &source[start..stop])
 }
 
 fn android_safe_path(root: &Path, relative: &Path) -> Result<(), String> {
@@ -1482,49 +1528,211 @@ mod tests {
         fs::remove_dir_all(destination).unwrap();
     }
 
+    fn edit_manifest(root: &Path, edit: impl FnOnce(&mut serde_json::Value)) {
+        let path = root.join(crate::android::MANIFEST_PATH);
+        let mut manifest: serde_json::Value =
+            serde_json::from_str(&read_file(&path).unwrap()).unwrap();
+        edit(&mut manifest);
+        fs::write(path, serde_json::to_string_pretty(&manifest).unwrap()).unwrap();
+    }
+
+    fn append(path: &Path, text: &str) {
+        let mut contents = fs::read(path).unwrap();
+        contents.extend_from_slice(text.as_bytes());
+        fs::write(path, contents).unwrap();
+    }
+
     #[test]
     fn android_conflicts_are_whole_tree_no_ops() {
         let destination = temp_root();
         let root = android_project(&destination);
         create_resource(&native_resource(&root, "Note")).unwrap();
-        for path in [
-            "rust/src/domain/note/ffi.rs",
-            "rust/src/ffi.rs",
-            "rust/src/schema.rs",
-            ".arc/android.json",
+        for (path, expected) in [
+            ("rust/src/domain/note/ffi.rs", "rust/src/domain/note/ffi.rs"),
+            (
+                "rust/src/ffi.rs",
+                "rust/src/ffi.rs (note ffi-methods block)",
+            ),
+            (
+                "rust/src/schema.rs",
+                "rust/src/schema.rs (note schema-migrations block)",
+            ),
         ] {
             let path = root.join(path);
             let original = fs::read(&path).unwrap();
-            let mut changed = original.clone();
-            // Break either file identity, owned block or manifest syntax.
-            if path.ends_with("ffi.rs") && path.parent().unwrap().ends_with("src") {
-                changed = String::from_utf8(changed)
-                    .unwrap()
-                    .replace("list_notes", "list_custom")
-                    .into_bytes();
-            } else if path.ends_with("schema.rs") {
-                changed = String::from_utf8(changed)
-                    .unwrap()
-                    .replace("00000000000001_notes_view", "00000000000099_notes_view")
-                    .into_bytes();
-            } else {
-                changed.extend_from_slice(b"\ncustomized");
+            // Break a file identity or an owned block.
+            let mut changed = String::from_utf8(original.clone())
+                .unwrap()
+                .replace("list_notes", "list_custom")
+                .replace("00000000000001_notes_view", "00000000000099_notes_view");
+            if changed.as_bytes() == original.as_slice() {
+                changed.push_str("// customized\n");
             }
             fs::write(&path, changed).unwrap();
             let before = tree(&root);
-            assert!(create_resource(&native_resource(&root, "Tag")).is_err());
-            assert_eq!(before, tree(&root));
-            assert!(create_resource(&native_resource(&root, "Note")).is_err());
+            let error = create_resource(&native_resource(&root, "Note")).unwrap_err();
+            assert_eq!(error, format!("Android resource conflict: {expected}"));
             assert_eq!(before, tree(&root));
             fs::write(&path, original).unwrap();
         }
+        let manifest = root.join(crate::android::MANIFEST_PATH);
+        let original = fs::read(&manifest).unwrap();
+        append(&manifest, "\ncustomized");
+        let before = tree(&root);
+        assert!(create_resource(&native_resource(&root, "Tag")).is_err());
+        assert!(create_resource(&native_resource(&root, "Note")).is_err());
+        assert_eq!(before, tree(&root));
+        fs::write(&manifest, original).unwrap();
         let path = root.join("rust/src/domain/note/commands.rs");
         let original = fs::read(&path).unwrap();
         fs::remove_file(&path).unwrap();
         let before = tree(&root);
-        assert!(create_resource(&native_resource(&root, "Tag")).is_err());
+        let error = create_resource(&native_resource(&root, "Note")).unwrap_err();
+        assert!(
+            error.contains("rust/src/domain/note/commands.rs"),
+            "{error}"
+        );
         assert_eq!(before, tree(&root));
         fs::write(path, original).unwrap();
+        fs::remove_dir_all(destination).unwrap();
+    }
+
+    #[test]
+    fn android_user_edits_in_one_resource_do_not_block_another() {
+        let destination = temp_root();
+        let root = android_project(&destination);
+        create_resource(&native_resource(&root, "Note")).unwrap();
+        let screen =
+            root.join("app/src/main/java/com/example/arc/app_native_catalog/note/NoteScreen.kt");
+        append(&screen, "// customized screen\n");
+        let ffi = root.join("rust/src/ffi.rs");
+        let edited = read_file(&ffi)
+            .unwrap()
+            .replace("pub async fn list_notes", "pub async fn list_custom_notes");
+        fs::write(&ffi, &edited).unwrap();
+        let customized_screen = fs::read(&screen).unwrap();
+        create_resource(&native_resource(&root, "Tag")).unwrap();
+        assert_eq!(fs::read(&screen).unwrap(), customized_screen);
+        let ffi_source = read_file(&ffi).unwrap();
+        assert_eq!(
+            ffi_source.matches("pub async fn list_custom_notes").count(),
+            1
+        );
+        assert_eq!(ffi_source.matches("pub async fn list_tags").count(), 1);
+        let before = tree(&root);
+        let error = create_resource(&native_resource(&root, "Note")).unwrap_err();
+        assert!(error.contains("note/NoteScreen.kt"), "{error}");
+        assert!(
+            error.contains("rust/src/ffi.rs (note ffi-methods block)"),
+            "{error}"
+        );
+        assert_eq!(before, tree(&root));
+        assert!(create_resource(&native_resource(&root, "Tag"))
+            .unwrap()
+            .files
+            .is_empty());
+        assert_eq!(before, tree(&root));
+        fs::remove_dir_all(destination).unwrap();
+    }
+
+    #[test]
+    fn android_template_changes_do_not_block_new_resources() {
+        let destination = temp_root();
+        let root = android_project(&destination);
+        create_resource(&native_resource(&root, "Note")).unwrap();
+        // Simulate output from an older CLI: on-disk content and its recorded identity
+        // differ from what the current templates render.
+        let repository =
+            "app/src/main/java/com/example/arc/app_native_catalog/note/NoteRepository.kt";
+        append(&root.join(repository), "// older template\n");
+        let older = crate::android::content_hash(&fs::read(root.join(repository)).unwrap());
+        let ffi = root.join("rust/src/ffi.rs");
+        let source = read_file(&ffi).unwrap();
+        let block = owned_block(&source, "note", "ffi-methods").unwrap();
+        let older_block = block.replace("pub async fn list_notes", "pub async fn list_all_notes");
+        fs::write(&ffi, source.replace(block, &older_block)).unwrap();
+        edit_manifest(&root, |manifest| {
+            let note = &mut manifest["resources"][0];
+            note["files"][repository] = older.into();
+            note["blocks"]["rust/src/ffi.rs#ffi-methods"] =
+                crate::android::content_hash(older_block.as_bytes()).into();
+        });
+        let before = tree(&root);
+        assert!(create_resource(&native_resource(&root, "Note"))
+            .unwrap()
+            .files
+            .is_empty());
+        assert_eq!(before, tree(&root));
+        assert!(!create_resource(&native_resource(&root, "Tag"))
+            .unwrap()
+            .files
+            .is_empty());
+        assert!(read_file(&ffi)
+            .unwrap()
+            .contains("pub async fn list_all_notes"));
+        let after = tree(&root);
+        assert!(create_resource(&native_resource(&root, "Note"))
+            .unwrap()
+            .files
+            .is_empty());
+        assert!(create_resource(&native_resource(&root, "Tag"))
+            .unwrap()
+            .files
+            .is_empty());
+        assert_eq!(after, tree(&root));
+        fs::remove_dir_all(destination).unwrap();
+    }
+
+    #[test]
+    fn android_reads_format_1_manifests() {
+        let destination = temp_root();
+        let root = android_project(&destination);
+        create_resource(&native_resource(&root, "Note")).unwrap();
+        // Format 1 recorded whole bodies and no skeleton identities.
+        edit_manifest(&root, |manifest| {
+            manifest["format_version"] = 1.into();
+            manifest.as_object_mut().unwrap().remove("files");
+            let note = &mut manifest["resources"][0];
+            for (path, identity) in note["files"].as_object_mut().unwrap() {
+                *identity = read_file(&root.join(path)).unwrap().into();
+            }
+            for (key, identity) in note["blocks"].as_object_mut().unwrap() {
+                let (path, marker) = key.split_once('#').unwrap();
+                let source = read_file(&root.join(path)).unwrap();
+                *identity = owned_block(&source, "note", marker).unwrap().into();
+            }
+        });
+        let before = tree(&root);
+        assert!(create_resource(&native_resource(&root, "Note"))
+            .unwrap()
+            .files
+            .is_empty());
+        assert_eq!(before, tree(&root));
+        let commands = root.join("rust/src/domain/note/commands.rs");
+        append(&commands, "// customized\n");
+        let customized = fs::read(&commands).unwrap();
+        let before = tree(&root);
+        let error = create_resource(&native_resource(&root, "Note")).unwrap_err();
+        assert_eq!(
+            error,
+            "Android resource conflict: rust/src/domain/note/commands.rs"
+        );
+        assert_eq!(before, tree(&root));
+        create_resource(&native_resource(&root, "Tag")).unwrap();
+        assert_eq!(fs::read(&commands).unwrap(), customized);
+        let manifest = crate::android::read_manifest(&root).unwrap().unwrap();
+        assert_eq!(manifest.format_version, crate::android::MANIFEST_FORMAT);
+        assert!(manifest.files.is_none());
+        for registration in &manifest.resources {
+            for identity in registration["files"]
+                .as_object()
+                .unwrap()
+                .values()
+                .chain(registration["blocks"].as_object().unwrap().values())
+            {
+                assert!(crate::android::is_content_hash(identity.as_str().unwrap()));
+            }
+        }
         fs::remove_dir_all(destination).unwrap();
     }
 

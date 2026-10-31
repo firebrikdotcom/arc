@@ -152,6 +152,16 @@ def device_ready(serial, emulator=False):
         fail(refusal if emulator else "selected DEVICE is not ready")
 
 
+def app_version():
+    """The version the build just packaged, read from app/build.gradle.kts."""
+    gradle_file = (ROOT / "app/build.gradle.kts").read_text()
+    name = re.search(r'^\s*versionName\s*=\s*"([^"]+)"', gradle_file, re.M)
+    code = re.search(r"^\s*versionCode\s*=\s*(\d+)\s*$", gradle_file, re.M)
+    if not name or not code:
+        fail("app/build.gradle.kts must set literal versionName and versionCode values")
+    return name.group(1), code.group(1)
+
+
 def build():
     bindings()
     rust()
@@ -186,10 +196,11 @@ def main():
         build()
         run(["adb", "-s", serial, "install", "-r", "app/build/outputs/apk/debug/app-debug.apk"])
         run(["adb", "-s", serial, "shell", "am", "start", "-W", "-n", PACKAGE + "/.MainActivity"])
+        version_name, version_code = app_version()
         info = output(["adb", "-s", serial, "shell", "dumpsys", "package", PACKAGE])
-        if "versionName=0.1.0" not in info or "versionCode=1 " not in info:
+        if not re.search(r"\bversionName=" + re.escape(version_name) + r"(\s|$)", info) or not re.search(r"\bversionCode=" + version_code + r"\b", info):
             fail("installed package/version verification failed")
-        print(PACKAGE + " versionName=0.1.0 versionCode=1 verified")
+        print(f"{PACKAGE} versionName={version_name} versionCode={version_code} verified")
     else:
         fail("unknown build stage")
 
