@@ -196,6 +196,15 @@ impl ArcAppBuilder {
     /// Register a caller-built stack for this aggregate, sharing its handles
     /// with HTTP handlers. The caller must rebuild projections at startup.
     /// Projectors and snapshot policy must be configured when building the stack.
+    ///
+    /// A supplied stack uses the in-process event bus only. When `EVENT_BUS`
+    /// selects anything else (for example `EVENT_BUS=nats`), [`Self::serve`]
+    /// fails before binding with an `InvalidInput` error naming the aggregate
+    /// and the variable; use [`Self::register_aggregate`] for a NATS deployment.
+    ///
+    /// The stack and `DATABASE_URL`/`DATABASE_DRIVER` must name the same
+    /// database: the server's health check and its SQLite session store still
+    /// read those variables, not the database the stack was built on.
     pub fn register_aggregate_with_stack<A: Aggregate + 'static>(
         mut self,
         stack: helpers::es_stack::SharedStack<A>,
@@ -216,6 +225,7 @@ impl ArcAppBuilder {
             supplied_stack: true,
             build: Box::new(move |_, _| {
                 Box::pin(async move {
+                    commands::serve::ensure_supplied_stack_event_bus(A::aggregate_type())?;
                     Ok(commands::serve::BuiltAggregateRuntime::new(
                         stack.command_bus,
                         stack.read_model_store,

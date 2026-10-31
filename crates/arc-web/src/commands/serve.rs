@@ -124,6 +124,23 @@ pub(crate) async fn build_aggregate_runtime<A: Aggregate + 'static>(
     ))
 }
 
+/// Reject a caller-supplied stack unless `EVENT_BUS` selects the in-process bus.
+/// Every `arc_stack::es_stack` builder wires an in-process bus, so under another bus
+/// the stack's events would never reach it and durable handlers would never run.
+pub(crate) fn ensure_supplied_stack_event_bus(aggregate_type: &str) -> io::Result<()> {
+    if event_bus_mode() == EventBusMode::InProcess {
+        return Ok(());
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!(
+            "aggregate {aggregate_type} is registered with register_aggregate_with_stack, \
+             which supports only the in-process event bus; unset EVENT_BUS or set \
+             EVENT_BUS=inprocess (EVENT_BUS=nats requires register_aggregate::<A>())"
+        ),
+    ))
+}
+
 /// Starts the Actix-Web HTTP server with every registered aggregate.
 pub(crate) async fn run(
     app_url: String,

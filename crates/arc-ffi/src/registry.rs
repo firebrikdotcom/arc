@@ -46,9 +46,12 @@ enum State<A: Aggregate + 'static> {
     Running(watch::Sender<Outcome<A>>),
     Ready(Arc<FfiCore<A>>),
 }
-struct Entry<A: Aggregate + 'static> {
+struct Cell<A: Aggregate + 'static> {
     configuration: String,
-    state: Mutex<State<A>>,
+    state: State<A>,
+}
+struct Entry<A: Aggregate + 'static> {
+    cell: Mutex<Cell<A>>,
 }
 type Entries = HashMap<(TypeId, CoreKey), Arc<dyn Any + Send + Sync>>;
 
@@ -78,7 +81,9 @@ impl CoreRegistry {
         })
     }
 
-    /// Initialize once on the owned runtime. Failed attempts are retryable explicitly.
+    /// Initialize once on the owned runtime. Failed attempts are retryable explicitly,
+    /// with the same or a corrected `configuration_id`; a different ID is a conflict
+    /// only while a core is initializing or ready.
     /// Callbacks must be idempotent and must never await opening their own key.
     pub async fn open<A, F, Fut>(
         self: &Arc<Self>,
@@ -100,25 +105,30 @@ impl CoreRegistry {
                 .entry((TypeId::of::<A>(), key.clone()))
                 .or_insert_with(|| {
                     Arc::new(Entry::<A> {
-                        configuration: configuration_id.clone(),
-                        state: Mutex::new(State::Idle),
+                        cell: Mutex::new(Cell {
+                            configuration: configuration_id.clone(),
+                            state: State::Idle,
+                        }),
                     })
                 })
                 .clone()
                 .downcast::<Entry<A>>()
                 .expect("aggregate TypeId matches entry")
         };
-        if entry.configuration != configuration_id {
-            return Err(FfiError::ConfigurationConflict.logged("core_registration"));
-        }
         let mut receiver = {
-            let mut state = entry.state.lock().unwrap();
-            match &*state {
+            let mut cell = entry.cell.lock().unwrap();
+            // An entry without a core (never opened or failed) accepts a new configuration.
+            if matches!(cell.state, State::Idle) {
+                cell.configuration = configuration_id;
+            } else if cell.configuration != configuration_id {
+                return Err(FfiError::ConfigurationConflict.logged("core_registration"));
+            }
+            match &cell.state {
                 State::Ready(core) => return Ok(core.clone()),
                 State::Running(sender) => sender.subscribe(),
                 State::Idle => {
                     let (sender, receiver) = watch::channel(None);
-                    *state = State::Running(sender.clone());
+                    cell.state = State::Running(sender.clone());
                     let entry = entry.clone();
                     let runtime = self.runtime.clone();
                     // Supervisor and initializer are detached from the opener. User code
@@ -136,8 +146,8 @@ impl CoreRegistry {
                             }
                             Err(_) => Err(FfiError::TaskCancelled.logged("core_initialization")),
                         };
-                        let mut state = entry.state.lock().unwrap();
-                        *state = match &result {
+                        let mut cell = entry.cell.lock().unwrap();
+                        cell.state = match &result {
                             Ok(core) => State::Ready(core.clone()),
                             Err(_) => State::Idle,
                         };

@@ -69,6 +69,11 @@ fn sqlite_identity_normalizes_new_existing_and_symlink_paths() {
         CoreKey::sqlite_file(dir.path().join("./db.sqlite")).unwrap()
     );
     assert_eq!(new.sqlite_path(), Some(file.as_path()));
+    let colon = dir.path().join("notes:v2.sqlite");
+    assert_eq!(
+        CoreKey::sqlite_file(colon.clone()).unwrap().sqlite_path(),
+        Some(colon.as_path())
+    );
     #[cfg(unix)]
     {
         let link = dir.path().join("alias");
@@ -91,6 +96,7 @@ fn sqlite_identity_normalizes_new_existing_and_symlink_paths() {
         dir.path().join("missing/db"),
         PathBuf::from(":memory:"),
         PathBuf::from("file:db.sqlite"),
+        PathBuf::from("sqlite://db.sqlite"),
         PathBuf::from(""),
     ] {
         assert_eq!(
