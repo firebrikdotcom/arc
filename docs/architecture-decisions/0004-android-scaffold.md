@@ -189,3 +189,14 @@ serials. The generated CLI help was checked against the built CLI; its command
 reference is in [Your first Android app](../android.md).
 
 2026-10-31: the release is 0.9.0 (decision U-9).
+
+2026-10-31: 0.9.0 is published to crates.io, which is the separately authorized
+release this ADR waited for. `arc new <name> --android` no longer requires
+`--arc-path` or `ARC_PATH`: by default the generated `rust/Cargo.toml` depends on
+`arc-core`, `arc-stack`, and `arc-ffi` by version only, pinned to the CLI's own
+version (`"=0.9.0"` for this release), with no path keys. `--arc-path PATH` (which
+wins) or `ARC_PATH` remains an opt-in for local framework development and emits
+absolute path dependencies with the checkout's version, validated as before.
+`--arc-path requires --android` and `--arc-path requires a directory` still apply;
+the missing-checkout error no longer exists. Existing generated projects keep the
+dependencies they were created with.

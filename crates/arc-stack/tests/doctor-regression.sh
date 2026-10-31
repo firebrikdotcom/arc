@@ -12,7 +12,7 @@ cp "$root/config/benthos/generated/events.yaml" "$dir/config/benthos/generated/"
 for crate in arc-core arc-es-sqlite arc-es-postgres arc-es-nats; do mkdir -p "$dir/crates/$crate"; done
 cat > "$dir/bin/cargo" <<'SH'
 #!/usr/bin/env bash
-printf '%s\n' 'arc-stack v0.8.11' "${FAKE_DEPENDENCY:-arc-core v0.8.11}"
+printf '%s\n' 'arc-stack v0.9.0' "${FAKE_DEPENDENCY:-arc-core v0.9.0}"
 SH
 printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/bin/npm"
 chmod +x "$dir/bin/"*

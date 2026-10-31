@@ -7,9 +7,9 @@ publish = false
 [lib]
 crate-type = ["rlib", "cdylib"]
 [dependencies]
-arc-core = { version = "{{arc-version}}", path = {{arc-core-path}} }
-arc-stack = { version = "{{arc-version}}", path = {{arc-stack-path}}, default-features = false, features = ["sqlite"] }
-arc-ffi = { version = "{{arc-version}}", path = {{arc-ffi-path}} }
+arc-core = { {{arc-core-source}} }
+arc-stack = { {{arc-stack-source}}, default-features = false, features = ["sqlite"] }
+arc-ffi = { {{arc-ffi-source}} }
 uniffi = { version = "=0.32.2", default-features = false }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }

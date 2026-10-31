@@ -2,8 +2,7 @@
 
 An FFI-only Arc/Compose app. An empty project opens a resource chooser without creating a database.
 
-The generated direct Arc dependencies use absolute paths to the explicitly selected local checkout.
-Keep that checkout available until a matching published release is available. Generation does not download tools.
+{{arc-dependency-note}} Generation does not download tools.
 
 Install Rust, cargo-ndk, the aarch64-linux-android and x86_64-linux-android Rust targets,
 JDK 17, Android SDK 36, build-tools 35.0.0, NDK 27.0.12077973, platform-tools and emulator.

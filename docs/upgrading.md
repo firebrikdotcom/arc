@@ -80,7 +80,7 @@ void the upgrade promise.
 
 The `arc-web::helpers::es_stack` and related public config paths remain
 source-compatible re-exports of `arc-stack` items. The extraction is additive;
-the 0.9.0 candidate has not been published. `arc-ffi` is a native adapter and
+it ships in 0.9.0, published to crates.io. `arc-ffi` is a native adapter and
 does not imply an Android web UI.
 
 The 0.9.0 SQLite behavior change sets a 5-second busy timeout on every new or
@@ -90,7 +90,7 @@ queue instead of failing immediately. A write waits while another connection
 holds the lock; it can still fail if the lock remains held longer than 5
 seconds, such as during a long transaction or by another process. Journal mode
 is unchanged (WAL is not enabled). This changes contention latency and lock
-acquisition behavior; it is implemented in the unpublished 0.9.0 candidate.
+acquisition behavior; it ships in 0.9.0, published to crates.io.
 
 - **SemVer:** `0.x` releases move in lockstep. A patch bump is compatible; a
   minor bump may break the public API surface defined in ADR 0002.

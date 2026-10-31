@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased — 0.9.0
+## Unreleased
+
+## 0.9.0 — 2026-10-31
+
+Published to crates.io. `arc-stack` and `arc-ffi` are published for the first time.
 
 ### Breaking changes (Phase 2 security hardening)
 
@@ -25,7 +29,10 @@ Details and migration steps: [Upgrading](docs/upgrading.md#phase-2-security-hard
   projection event-origin controls (see `docs/phase-2-security-hardening.md`).
 
 - Add `arc new --android`, `arc doctor --android`, and
-  `arc generate resource --ffi` for native Android app scaffolding.
+  `arc generate resource --ffi` for native Android app scaffolding. Generated
+  projects depend on the published `arc-core`, `arc-stack`, and `arc-ffi`
+  crates pinned to the CLI's own version; `--arc-path PATH` or `ARC_PATH`
+  opts into a local Arc checkout for framework development.
 
 - Add headless `arc-stack` for shared event-sourced stack assembly and retain
   the existing `arc-web` stack/config public paths as re-exports.
@@ -42,5 +49,4 @@ Details and migration steps: [Upgrading](docs/upgrading.md#phase-2-security-hard
   Appends acquire an IMMEDIATE write transaction before reading the current
   version, so competing writers queue instead of failing immediately. A lock
   held longer than 5 seconds can still fail. Journal mode remains unchanged;
-  see [Upgrading](docs/upgrading.md). This behavior change is not yet released.
-- This candidate has not been published; release 0.9.0 needs authorization.
+  see [Upgrading](docs/upgrading.md).

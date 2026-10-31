@@ -213,3 +213,5 @@ normative contract it implements.
   config and the Arc-owned structural boundary under `crates/arc-app/src` are checked today).
 
 2026-10-31: the release is 0.9.0 (decision U-9).
+
+2026-10-31: 0.9.0, including the first releases of `arc-stack` and `arc-ffi`, is published to crates.io. Statements above that call these crates unpublished candidates or say no release is authorized describe the state before this release.

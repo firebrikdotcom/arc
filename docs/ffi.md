@@ -4,9 +4,9 @@
 It owns runtime lifetime and infrastructure errors. Your application owns the
 aggregate, projectors, schema/migrations, validation, records and exported objects.
 `arc-web` and `arc-ffi` are independent sibling adapters. Existing web consumers
-need no changes. This source addition is not a published release or an app migration.
+need no changes. `arc-ffi` is part of 0.9.0, published to crates.io; it is not an app migration.
 
-## 0.9.0 SQLite contention behavior (candidate)
+## 0.9.0 SQLite contention behavior
 
 The 0.9.0 `arc-es-sqlite` change applies a 5-second busy timeout to every new
 and replacement connection in both stores. Appends acquire an `IMMEDIATE`
@@ -15,21 +15,21 @@ for the SQLite write lock instead of failing immediately; a lock held longer
 than 5 seconds can still produce a database error. Same-stream optimistic
 version checks still return typed concurrency conflicts. Journal mode is
 unchanged; WAL is not enabled. This observable latency/contention behavior
-change is implemented in the unpublished 0.9.0 candidate; see
+change ships in 0.9.0, published to crates.io; see
 [Upgrading](upgrading.md).
 
 ## Dependencies and features
 
 ```toml
 [dependencies]
-arc-core = "0.8.11"
-arc-stack = { version = "0.8.11", default-features = false }
-arc-ffi = { version = "0.8.11", features = ["sqlite"] }
+arc-core = "0.9.0"
+arc-stack = { version = "0.9.0", default-features = false }
+arc-ffi = { version = "0.9.0", features = ["sqlite"] }
 uniffi = { version = "=0.32.2", default-features = false }
 ```
 
-Use matching local paths while testing the unpublished addition. All Arc crates
-remain at the current workspace version until a coordinated release bump.
+Arc crates are released in lockstep, so keep every `arc-*` dependency on the
+same version. Use matching local paths only while developing Arc itself.
 
 | Feature | Effect |
 |---|---|

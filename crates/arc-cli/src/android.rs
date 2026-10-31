@@ -88,11 +88,58 @@ pub fn identifiers(name: &str) -> Result<(String, String), String> {
     ))
 }
 
-fn checkout(
-    explicit: Option<&Path>,
-    environment: Option<PathBuf>,
-) -> Result<(PathBuf, String), String> {
-    let root = explicit.map(Path::to_path_buf).or(environment).ok_or("Android scaffolding requires a local Arc checkout: pass --arc-path PATH or set ARC_PATH (0.9.0 is not published)")?;
+/// The Arc crates a generated Android project depends on.
+#[derive(Debug, PartialEq)]
+enum ArcSource {
+    /// Published crates pinned to this CLI's own version (the default).
+    Registry(String),
+    /// A local Arc checkout opted into with `--arc-path` or `ARC_PATH`.
+    Checkout { root: PathBuf, version: String },
+}
+
+impl ArcSource {
+    /// Inline TOML table body for one direct Arc dependency.
+    fn dependency(&self, krate: &str) -> Result<String, String> {
+        match self {
+            Self::Registry(version) => Ok(format!(
+                "version = {}",
+                toml::Value::String(format!("={version}"))
+            )),
+            Self::Checkout { root, version } => {
+                let path = root.join("crates").join(krate);
+                let path = path.to_str().ok_or(CHECKOUT_ERROR)?;
+                Ok(format!(
+                    "version = {}, path = {}",
+                    toml::Value::String(version.clone()),
+                    toml::Value::String(path.into())
+                ))
+            }
+        }
+    }
+
+    fn readme_note(&self) -> String {
+        match self {
+            Self::Registry(version) => format!(
+                "The direct Arc dependencies (arc-core, arc-stack, arc-ffi) are pinned to version {version} from crates.io."
+            ),
+            Self::Checkout { version, .. } => format!(
+                "The direct Arc dependencies (arc-core, arc-stack, arc-ffi) use absolute paths to the local Arc checkout \
+                 selected with --arc-path or ARC_PATH (version {version}).\nKeep that checkout available while building."
+            ),
+        }
+    }
+}
+
+/// Without `--arc-path` or `ARC_PATH`, use the published crates matching this CLI.
+fn arc_source(explicit: Option<&Path>, environment: Option<PathBuf>) -> Result<ArcSource, String> {
+    let environment = environment.filter(|path| !path.as_os_str().is_empty());
+    match explicit.map(Path::to_path_buf).or(environment) {
+        None => Ok(ArcSource::Registry(env!("CARGO_PKG_VERSION").into())),
+        Some(root) => checkout(&root).map(|(root, version)| ArcSource::Checkout { root, version }),
+    }
+}
+
+fn checkout(root: &Path) -> Result<(PathBuf, String), String> {
     let root = root.canonicalize().map_err(|_| CHECKOUT_ERROR)?;
     let read = |path: &Path| -> Result<toml::Value, String> {
         toml::from_str(&fs::read_to_string(path).map_err(|_| CHECKOUT_ERROR.to_string())?)
@@ -144,8 +191,18 @@ pub fn create_project(
     arc_path: Option<&Path>,
     git: bool,
 ) -> Result<PathBuf, String> {
+    identifiers(name)?;
+    let source = arc_source(arc_path, std::env::var_os("ARC_PATH").map(PathBuf::from))?;
+    generate_project(name, destination, &source, git)
+}
+
+fn generate_project(
+    name: &str,
+    destination: &Path,
+    source: &ArcSource,
+    git: bool,
+) -> Result<PathBuf, String> {
     let (crate_name, application_id) = identifiers(name)?;
-    let (checkout, version) = checkout(arc_path, std::env::var_os("ARC_PATH").map(PathBuf::from))?;
     let root = destination.join(name);
     if root.exists() {
         return Err(format!(
@@ -169,15 +226,13 @@ pub fn create_project(
         ("{{package-path}}", application_id.replace('.', "/")),
     ]);
     for (key, krate) in [
-        ("{{arc-core-path}}", "arc-core"),
-        ("{{arc-stack-path}}", "arc-stack"),
-        ("{{arc-ffi-path}}", "arc-ffi"),
+        ("{{arc-core-source}}", "arc-core"),
+        ("{{arc-stack-source}}", "arc-stack"),
+        ("{{arc-ffi-source}}", "arc-ffi"),
     ] {
-        let path = checkout.join("crates").join(krate);
-        let path = path.to_str().ok_or(CHECKOUT_ERROR)?;
-        replacements.insert(key, toml::Value::String(path.into()).to_string());
+        replacements.insert(key, source.dependency(krate)?);
     }
-    replacements.insert("{{arc-version}}", version);
+    replacements.insert("{{arc-dependency-note}}", source.readme_note());
     fs::create_dir_all(&root).map_err(|e| e.to_string())?;
     let result = (|| {
         for (path, bytes) in FILES {
@@ -551,7 +606,7 @@ mod tests {
         fs::create_dir_all(root).unwrap();
         fs::write(
             root.join("Cargo.toml"),
-            "[workspace.package]\nversion = \"0.8.11\"\n",
+            "[workspace.package]\nversion = \"1.2.3\"\n",
         )
         .unwrap();
         for krate in ["arc-core", "arc-stack", "arc-ffi"] {
@@ -599,27 +654,62 @@ mod tests {
     }
 
     #[test]
-    fn checkout_precedence_validation_and_no_implicit_fallback() {
+    fn checkout_precedence_validation_and_registry_default() {
         let temp = Temp::new();
         fake_checkout(&temp.0);
-        assert!(checkout(None, None)
-            .unwrap_err()
-            .contains("pass --arc-path"));
+        let registry = ArcSource::Registry(env!("CARGO_PKG_VERSION").into());
+        assert_eq!(arc_source(None, None).unwrap(), registry);
+        assert_eq!(arc_source(None, Some(PathBuf::new())).unwrap(), registry);
+        let checkout = ArcSource::Checkout {
+            root: temp.0.canonicalize().unwrap(),
+            version: "1.2.3".into(),
+        };
         assert_eq!(
-            checkout(Some(&temp.0), Some("/missing".into())).unwrap().0,
-            temp.0.canonicalize().unwrap()
+            arc_source(Some(&temp.0), Some("/missing".into())).unwrap(),
+            checkout
         );
-        assert!(checkout(Some(Path::new("/missing")), Some(temp.0.clone())).is_err());
-        assert!(checkout(None, Some(temp.0.clone())).is_ok());
+        assert!(arc_source(Some(Path::new("/missing")), Some(temp.0.clone())).is_err());
+        assert_eq!(arc_source(None, Some(temp.0.clone())).unwrap(), checkout);
         fs::write(
             temp.0.join("crates/arc-ffi/Cargo.toml"),
             "[package]\nname = \"arc-ffi\"\nversion = \"9.0.0\"",
         )
         .unwrap();
         assert_eq!(
-            checkout(None, Some(temp.0.clone())).unwrap_err(),
+            arc_source(None, Some(temp.0.clone())).unwrap_err(),
             CHECKOUT_ERROR
         );
+    }
+
+    #[test]
+    fn default_project_pins_published_arc_crates_without_paths() {
+        let temp = Temp::new();
+        let source = ArcSource::Registry(env!("CARGO_PKG_VERSION").into());
+        let root = generate_project("registry-app", &temp.0, &source, false).unwrap();
+        let cargo: toml::Value =
+            toml::from_str(&fs::read_to_string(root.join("rust/Cargo.toml")).unwrap()).unwrap();
+        let pinned = format!("={}", env!("CARGO_PKG_VERSION"));
+        for name in ["arc-core", "arc-stack", "arc-ffi"] {
+            let dependency = cargo["dependencies"][name].as_table().unwrap();
+            assert_eq!(
+                dependency["version"].as_str(),
+                Some(pinned.as_str()),
+                "{name}"
+            );
+            assert!(
+                !dependency.contains_key("path"),
+                "{name} must not use a path"
+            );
+            assert!(!dependency.contains_key("git"), "{name} must not use git");
+        }
+        let stack = cargo["dependencies"]["arc-stack"].as_table().unwrap();
+        assert_eq!(stack["default-features"].as_bool(), Some(false));
+        let readme = fs::read_to_string(root.join("README.md")).unwrap();
+        assert!(readme.contains(&format!(
+            "pinned to version {} from crates.io",
+            env!("CARGO_PKG_VERSION")
+        )));
+        assert!(!readme.contains("{{"));
     }
 
     #[test]
@@ -654,7 +744,7 @@ mod tests {
             );
             assert_eq!(
                 cargo["dependencies"][name]["version"].as_str(),
-                Some("0.8.11")
+                Some("1.2.3")
             );
         }
         let kotlin = root.join("app/src/main/java/com/example/arc/app_my_notes/ResourceCatalog.kt");

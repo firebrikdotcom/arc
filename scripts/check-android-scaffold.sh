@@ -2,6 +2,7 @@
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 export CARGO_BUILD_JOBS=4
+# Build the generated app against this checkout, not the published crates.
 export ARC_PATH="$root"
 export CARGO_TARGET_DIR="${ARC_ANDROID_SCAFFOLD_TARGET:-$root/target/android-scaffold}"
 if [[ ${ARC_ANDROID_E2E:-0} == 1 && ! ${E2E_DEVICE:-emulator-5580} =~ ^emulator-[0-9]+$ ]]; then

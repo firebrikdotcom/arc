@@ -216,3 +216,5 @@ legacy Arc web import path changes. The native Android consumer still needs a
 separate migration to `arc-stack` and `arc-ffi`; no release is authorized here.
 
 2026-10-31: the release is 0.9.0 (decision U-9).
+
+2026-10-31: 0.9.0, including the first releases of `arc-stack` and `arc-ffi`, is published to crates.io. Statements above that call these crates unpublished candidates or say no release is authorized describe the state before this release.

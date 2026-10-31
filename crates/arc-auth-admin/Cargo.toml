@@ -8,9 +8,9 @@ repository.workspace = true
 description = "Optional host-rendered browser administration for Arc authentication"
 
 [dependencies]
-arc-auth-core = { path = "../arc-auth-core", version = "0.8.11" }
-arc-auth-session = { path = "../arc-auth-session", version = "0.8.11" }
-arc-web = { path = "../arc-web", version = "0.8.11" }
+arc-auth-core = { path = "../arc-auth-core", version = "0.9.0" }
+arc-auth-session = { path = "../arc-auth-session", version = "0.9.0" }
+arc-web = { path = "../arc-web", version = "0.9.0" }
 actix-session.workspace = true
 actix-web.workspace = true
 async-trait.workspace = true
