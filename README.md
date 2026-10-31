@@ -43,6 +43,8 @@ show package metadata, not quality certification. Arc is licensed under
 
 ## Start a new application
 
+For a native Android project, see [Your first Android app](docs/android.md).
+
 You do not need to clone this repository. Install the generator and create a minimal application:
 
 ```bash

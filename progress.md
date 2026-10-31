@@ -1,6 +1,6 @@
 # Arc Project Progress
 
-**Last updated:** 2026-10-24
+**Last updated:** 2026-10-30
 **Current development version:** 0.8.11
 **Latest published version:** 0.8.11
 **Status:** v0.8.11 adds a collapsible navigation rail to the generated admin layout
@@ -22,6 +22,22 @@ observability, and developer experience.
 
 This is the canonical project-status and roadmap tracker. Current source code and accepted ADRs
 take precedence when a claim here becomes stale.
+
+## Android scaffold (U-4, Q-17/Q-17a) — in progress — 2026-10-30
+
+- The milestone adds `arc new --android`, FFI resource generation, Android
+  toolchain diagnosis, and generated-project build/test/deploy targets. The
+  settled contract is in [ADR 0004](docs/architecture-decisions/0004-android-scaffold.md).
+- T2a (CLI/scaffold) is underway; T2b (native resources) follows, then T2c
+  (acceptance tests/CI). T2d documentation is drafted ahead of those tasks;
+  command behavior and outputs remain to verify against the tested CLI and
+  emulator.
+- 0.8.12 publication remains unauthorized. Until a release is separately
+  approved and available, generated projects require a matching local Arc
+  checkout and use its recorded path dependencies.
+- Emulator E2E is limited to an explicitly selected emulator. Deployment
+  requires an explicit serial and installs in place without clearing data.
+  See [Your first Android app](docs/android.md).
 
 ## Shared stack and UI adapters (ADR 0003) — 2026-10-30
 

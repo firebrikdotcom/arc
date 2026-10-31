@@ -1,6 +1,7 @@
 * Start
   * [What Arc Is](README.md)
   * [Create an App](getting-started.md)
+  * [Your first Android app](android.md)
   * [Application Anatomy](project-structure.md)
   * [Application Workflows](workflows.md)
   * [Command Bus](command-bus.md)
@@ -46,6 +47,7 @@
   * [ADR 0001: Benthos Routing](architecture-decisions/0001-benthos-only-event-routing.md)
   * [ADR 0002: Upgrade Contract](architecture-decisions/0002-framework-upgrade-contract.md)
   * [ADR 0003: Shared Stack UI Adapters](architecture-decisions/0003-shared-stack-ui-adapters.md)
+  * [ADR 0004: Android Scaffold](architecture-decisions/0004-android-scaffold.md)
 
 * Help
   * [Troubleshooting](troubleshooting.md)
