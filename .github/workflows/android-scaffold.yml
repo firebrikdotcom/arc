@@ -1,0 +1,41 @@
+name: Android Scaffold
+on:
+  workflow_dispatch:
+  push:
+    paths: ['crates/arc-cli/**', 'crates/arc-ffi/**', 'crates/arc-stack/**', 'scripts/check-android-scaffold.sh', '.github/workflows/android-scaffold.yml']
+  pull_request:
+    paths: ['crates/arc-cli/**', 'crates/arc-ffi/**', 'crates/arc-stack/**', 'scripts/check-android-scaffold.sh', '.github/workflows/android-scaffold.yml']
+concurrency:
+  group: android-scaffold-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: aarch64-linux-android,x86_64-linux-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: false
+      - uses: Swatinem/rust-cache@v2
+      - uses: gradle/actions/setup-gradle@v4
+      - run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'ndk;27.0.12077973' 'emulator'
+      - run: cargo install cargo-ndk --locked
+      - name: Build generated Android app
+        if: github.event_name != 'workflow_dispatch'
+        run: bash scripts/check-android-scaffold.sh
+      - name: Verify generated app on emulator
+        if: github.event_name == 'workflow_dispatch'
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -no-audio -no-boot-anim
+          script: ARC_ANDROID_E2E=1 E2E_DEVICE=emulator-5554 bash scripts/check-android-scaffold.sh

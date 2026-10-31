@@ -92,6 +92,12 @@ fn every_command_help_is_specific_and_read_only() {
         (&["plugin", "add"], "arc plugin add <name>"),
         (&["plugin", "migrate-auth-ui"], "arc plugin migrate-auth-ui"),
         (&["new", "demo", "--ui"], "arc new <name>"),
+        (&["new", "demo", "--android"], "arc new <name>"),
+        (
+            &["generate", "resource", "Note", "--ffi"],
+            "arc generate resource <name>",
+        ),
+        (&["doctor", "--android"], "arc doctor"),
         (
             &["generate", "resource", "Product", "--api"],
             "arc generate resource <name>",
@@ -132,6 +138,36 @@ fn every_command_help_is_specific_and_read_only() {
                 assert!(stdout.contains(expected), "{command:?} {flag}: {stdout}");
                 assert!(stdout.contains("Usage:"), "{stdout}");
                 assert!(output.stderr.is_empty(), "{output:?}");
+            }
+        }
+    }
+    for (command, expected) in [
+        (vec!["new", "demo", "--android"], "arc new <name>"),
+        (
+            vec!["generate", "resource", "Note", "--ffi"],
+            "arc generate resource <name>",
+        ),
+    ] {
+        for position in 1..=command.len() {
+            for flag in ["--help", "-h"] {
+                let mut args = command.clone();
+                args.insert(position, flag);
+                let output = Command::new(&sandbox.cli)
+                    .args(&args)
+                    .current_dir(&app)
+                    .output()
+                    .unwrap();
+                assert!(output.status.success(), "{args:?}: {output:?}");
+                let expected_at_position = if command[0] == "generate" && position == 1 {
+                    "arc generate <command>"
+                } else {
+                    expected
+                };
+                assert!(
+                    String::from_utf8_lossy(&output.stdout).contains(expected_at_position),
+                    "{args:?}: {output:?}"
+                );
+                assert_eq!(snapshot(&sandbox.work), before, "{args:?} modified files");
             }
         }
     }
@@ -204,5 +240,43 @@ fn root_help_and_version_remain_available() {
             assert_eq!(stdout.trim(), format!("arc {}", env!("CARGO_PKG_VERSION")));
         }
         assert!(snapshot(&sandbox.work).is_empty());
+    }
+}
+
+#[test]
+fn android_option_errors_leave_tree_unchanged() {
+    let sandbox = Sandbox::new();
+    let cases: &[(&[&str], &str)] = &[
+        (&["new", "demo", "--android", "--ui"], "--android"),
+        (&["new", "demo", "--android", "--api"], "--android"),
+        (&["new", "demo", "--arc-path", "."], "--arc-path"),
+        (&["generate", "resource", "Note", "--ffi", "--api"], "--ffi"),
+        (&["generate", "resource", "Note", "--ffi", "--ui"], "--ffi"),
+        (
+            &["generate", "resource", "Note", "--ffi", "--roles"],
+            "--ffi",
+        ),
+        (
+            &["generate", "resource", "Note", "--ffi", "--api-auth"],
+            "--ffi",
+        ),
+        (
+            &["generate", "resource", "Note", "--ffi", "--ui-auth"],
+            "--ffi",
+        ),
+    ];
+    for (args, diagnostic) in cases {
+        let before = snapshot(&sandbox.work);
+        let output = Command::new(&sandbox.cli)
+            .args(*args)
+            .current_dir(&sandbox.work)
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{args:?}: {output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(diagnostic),
+            "{args:?}: {output:?}"
+        );
+        assert_eq!(snapshot(&sandbox.work), before, "{args:?} modified files");
     }
 }
