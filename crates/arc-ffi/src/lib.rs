@@ -56,5 +56,46 @@ pub async fn build_stack<A: Aggregate>(
     arc_stack::es_stack::build_with_driver(driver, database_url, projectors, snapshot_policy)
         .await
         .map(Into::into)
-        .map_err(|_| FfiError::StackInitializationFailed.logged("stack_initialization"))
+        .map_err(|error| {
+            // Log only a fixed category; messages may carry paths, DSNs or SQL.
+            tracing::error!(
+                cause = stack_failure_cause(error.as_ref()),
+                "stack initialization cause"
+            );
+            FfiError::StackInitializationFailed.logged("stack_initialization")
+        })
+}
+
+fn stack_failure_cause(error: &(dyn std::error::Error + 'static)) -> &'static str {
+    use arc_core::{
+        event_bus::EventBusError, event_store::EventStoreError, read_model_store::ReadModelError,
+    };
+    if error.is::<EventStoreError>() {
+        "event_store"
+    } else if error.is::<ReadModelError>() {
+        "read_model_store"
+    } else if error.is::<EventBusError>() {
+        "event_bus"
+    } else {
+        "other"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::stack_failure_cause;
+    use arc_core::{event_store::EventStoreError, read_model_store::ReadModelError};
+
+    #[test]
+    fn stack_failure_cause_is_a_fixed_category() {
+        let store: Box<dyn std::error::Error> = Box::new(EventStoreError::AggregateNotFound {
+            aggregate_id: "/private/path".into(),
+        });
+        let read: Box<dyn std::error::Error> =
+            Box::new(ReadModelError::other("postgres://secret@host/db"));
+        let other: Box<dyn std::error::Error> = "SELECT secret".into();
+        assert_eq!(stack_failure_cause(store.as_ref()), "event_store");
+        assert_eq!(stack_failure_cause(read.as_ref()), "read_model_store");
+        assert_eq!(stack_failure_cause(other.as_ref()), "other");
+    }
 }

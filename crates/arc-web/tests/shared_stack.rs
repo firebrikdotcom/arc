@@ -18,6 +18,9 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+#[path = "support/env_guard.rs"]
+mod env_guard;
+
 static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Default)]
@@ -295,5 +298,36 @@ async fn build_with_driver_uses_explicit_driver_even_if_env_differs() {
     } else {
         std::env::remove_var("DATABASE_DRIVER");
     }
+    let _ = std::fs::remove_file(path);
+}
+
+#[actix_web::test]
+async fn supplied_stack_rejects_non_in_process_event_bus() {
+    let _guard = ENV_LOCK.lock().await;
+    let path =
+        std::env::temp_dir().join(format!("arc-shared-nats-{}.sqlite", uuid::Uuid::new_v4()));
+    let stack = create_stack(&path).await;
+    let _env = env_guard::EnvGuard::new(&[
+        ("EVENT_BUS", Some("nats")),
+        ("DATABASE_URL", path.to_str()),
+        (
+            "SECRET_KEY",
+            Some("0123456789012345678901234567890123456789012345678901234567890123"),
+        ),
+    ]);
+    let error = ArcApp::builder()
+        .register_aggregate_with_stack(stack)
+        .register_routes(|cfg| {
+            cfg.route("/items/{id}", web::get().to(read));
+        })
+        .serve("127.0.0.1".into(), 0)
+        .await
+        .expect_err("a supplied stack must not start under EVENT_BUS=nats");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    let message = error.to_string();
+    assert!(
+        message.contains("aggregate Item") && message.contains("EVENT_BUS"),
+        "{message}"
+    );
     let _ = std::fs::remove_file(path);
 }

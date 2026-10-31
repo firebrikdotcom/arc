@@ -75,6 +75,12 @@ CoreKey::postgres(namespace: String) -> Result<CoreKey, FfiError>
 
 `run`, `open` and `build_stack` are async. `build_stack` only delegates to
 `arc_stack::es_stack::build_with_driver`; it never creates another wiring recipe.
+Only the driver is explicit: the SQLite event store still reads
+`EVENT_INTEGRITY_KEY` and `EVENT_INTEGRITY_KEY_ID` from the process environment.
+A native host that does not set them before `build_stack` stores unsigned events.
+When `build_stack` fails it logs a fixed cause category (`event_store`,
+`read_model_store`, `event_bus` or `other`) before returning
+`StackInitializationFailed`.
 The initialization closure executes on the registry runtime:
 
 ```rust,ignore
@@ -107,7 +113,9 @@ aggregate/key, including recursive initialization from the same thread.
 Keys are opaque, cloneable, equal and hashable. SQLite keys canonicalize an
 existing file, including symlinks. For a new file they canonicalize the existing
 parent and append a valid filename. Missing parents, directories, unresolved
-symlinks, non-UTF8 paths, URI names and `:memory:` are rejected. Resolve keys
+symlinks, non-UTF8 paths, names containing `?` or `#`, names starting with
+`file:` or `sqlite:`, and exactly `:memory:` are rejected. Other colons, such as
+Windows drive letters, are literal path characters. Resolve keys
 synchronously off the UI thread; callers must not replace/delete a database
 file or change symlink targets while its core is registered.
 
@@ -115,9 +123,10 @@ Postgres keys require a nonempty stable nonsecret app-assigned namespace. Captur
 the DSN separately in the callback. Use the same namespace for all aliases of
 one database: the registry does not infer URL equivalence. Every open requires
 a nonempty stable nonsecret `configuration_id` covering schema, projectors and
-snapshot policy. A different ID for an existing entry returns
-`ConfigurationConflict`, even after a failed initialization; it never silently
-reconfigures a core.
+snapshot policy. A different ID returns `ConfigurationConflict` while the
+entry's core is initializing or ready; it never silently reconfigures a core.
+After a failed initialization no core exists, so the next explicit open may use
+a corrected ID without restarting the process.
 
 `process()` retains one registry/runtime per linked app library. Entries are
 keyed by aggregate `TypeId` plus database key, so distinct aggregate types do not

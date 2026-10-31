@@ -16,7 +16,11 @@ impl CoreKey {
     pub fn sqlite_file(path: PathBuf) -> Result<Self, FfiError> {
         let invalid = || FfiError::InvalidDatabasePath.logged("database_identity");
         let input = path.to_str().ok_or_else(invalid)?;
-        if input.is_empty() || input.contains(':') || input.contains('?') || input.contains('#') {
+        // SQLite treats only `:memory:` and `file:` names specially (Diesel also rewrites
+        // `sqlite://` to `file:`); other colons, such as Windows drive letters, are literal.
+        let special =
+            input == ":memory:" || input.starts_with("file:") || input.starts_with("sqlite:");
+        if input.is_empty() || special || input.contains('?') || input.contains('#') {
             return Err(invalid());
         }
         let resolved = match std::fs::symlink_metadata(&path) {

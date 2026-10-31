@@ -90,4 +90,8 @@ let app = ArcApp::builder()
 // Other adapters can use stack.command_bus and stack.read_model_store.
 ```
 
+A supplied stack uses the in-process event bus only: every `arc_stack::es_stack` builder wires one. If `EVENT_BUS` selects another bus (for example `EVENT_BUS=nats`), `serve` returns an `InvalidInput` error naming the aggregate and `EVENT_BUS` before it binds. Use `register_aggregate::<A>()` for a NATS deployment.
+
+The stack and `DATABASE_URL`/`DATABASE_DRIVER` must name the same database. The server's startup health check and its SQLite session store still read those variables, not the database the stack was built on.
+
 The existing `arc_web::helpers::es_stack` and `arc_web::helpers::config::DatabaseDriver` paths remain available as re-exports of the same types and functions.

@@ -160,6 +160,10 @@ pub async fn build<A: Aggregate>(
 
 /// Build an in-process stack using an explicitly selected database driver.
 /// The caller is responsible for rebuilding projections when required.
+///
+/// Only the driver is explicit. The SQLite event store still reads
+/// `EVENT_INTEGRITY_KEY` and `EVENT_INTEGRITY_KEY_ID` from the process
+/// environment; when they are unset, events are stored unsigned.
 pub async fn build_with_driver<A: Aggregate>(
     driver: DatabaseDriver,
     database_url: &str,

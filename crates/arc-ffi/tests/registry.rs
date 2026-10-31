@@ -117,6 +117,34 @@ async fn failure_panic_and_explicit_retry_never_strand_waiters() {
 }
 
 #[tokio::test]
+async fn failed_initialization_accepts_a_corrected_configuration() {
+    let registry = CoreRegistry::new(FfiRuntime::new().unwrap());
+    let failed = registry
+        .open::<Example, _, _>(key(), "broken".into(), |_| async {
+            Err(FfiError::SchemaInitializationFailed)
+        })
+        .await;
+    assert!(matches!(failed, Err(FfiError::SchemaInitializationFailed)));
+    let corrected = registry
+        .open::<Example, _, _>(key(), "fixed".into(), |_| async { Ok(stack()) })
+        .await
+        .unwrap();
+    assert!(matches!(
+        registry
+            .open::<Example, _, _>(key(), "broken".into(), |_| async { Ok(stack()) })
+            .await,
+        Err(FfiError::ConfigurationConflict)
+    ));
+    let reopened = registry
+        .open::<Example, _, _>(key(), "fixed".into(), |_| async {
+            panic!("must not reinitialize")
+        })
+        .await
+        .unwrap();
+    assert!(Arc::ptr_eq(&corrected, &reopened));
+}
+
+#[tokio::test]
 async fn cancelled_opener_leaves_initializer_alive_for_other_waiters() {
     let registry = CoreRegistry::new(FfiRuntime::new().unwrap());
     let (started_tx, started_rx) = oneshot::channel();

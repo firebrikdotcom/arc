@@ -68,6 +68,8 @@ Those portions remain dated history, not active requirements.
 counterpart to `arc-web`, over `arc-stack`, without web dependencies. Q-15 below
 specifies its API and runtime contract.
 
+**C-3 — Supplied stack and EVENT_BUS (2026-10-31).** `register_aggregate_with_stack` is new API, so rejecting `EVENT_BUS=nats` (or any non-in-process bus) for a supplied stack is not a compatibility break. Startup fails fast with a descriptive error naming the aggregate and the variable. A NATS-capable shared stack is a follow-up.
+
 ### Specification of the change
 
 **Q-14 — Headless stack crate.** The stack assembly API is ultimately owned by a new headless `arc-stack` crate (`arc_stack`), above core/storage and below `arc-web`. It has no dependency on `arc-web`, auth, Actix, or Tera. The T1 API is implemented first, then extracted without changing its agreed signatures. The shared handle has public fields so the application can retain and use the same bus outside the HTTP adapter, and so the existing stack handles remain directly available:
@@ -92,6 +94,8 @@ pub fn register_aggregate_with_stack<A: Aggregate + 'static>(
 ```
 
 The method registers the supplied handles as the aggregate runtime. It retains duplicate-aggregate validation consistent with `register_aggregate::<A>()`. Builder calls that configure projectors after this registration panic immediately, even when given an empty vector. Calling `snapshot_policy(None)` after it also panics: the attempted configuration itself is invalid for a supplied, already-configured stack. The panic explains that the supplied stack owns its projectors and snapshot policy. Projector or snapshot configuration before any aggregate registration retains the existing missing-registration failure. This tracking must distinguish “the setter was called with `None`” from “no policy setter was called.”
+
+A supplied stack is in-process only (C-3). When `EVENT_BUS` selects anything other than the in-process bus, startup fails at the point that reads `EVENT_BUS` for registrations, before the server binds, with an `InvalidInput` error naming the aggregate and the variable. The supplied stack and `DATABASE_URL`/`DATABASE_DRIVER` must name the same database, because the health check and the SQLite session store still read those variables.
 
 The supplied-stack path does not call `ProjectionEngine::rebuild_all()` on startup. Rebuilding is the caller's responsibility because the caller owns stack initialization and lifecycle. The existing `register_aggregate::<A>()` startup path, including its in-process projection subscription and rebuild behavior, remains unchanged.
 
@@ -170,6 +174,7 @@ superseded by U-1; the remaining app migration is FFI-only):
 - Migrate `arc-android-prototype` to `arc-stack` + `arc-ffi`, preserving its database/schema, recordings, application identity and typed domain behavior; verify FFI-only dependency isolation and emulator data continuity.
 - Obtain authorization before a 0.8.12 release; nothing from this candidate has been published.
 - The app currently does not delete recordings when their note is deleted; that existing gap is outside this stack-sharing change.
+- A NATS-capable supplied stack (C-3), and an explicit integrity-key parameter for `build_with_driver`/`build_stack` instead of the `EVENT_INTEGRITY_KEY` environment variables.
 
 ## Implementation record
 
