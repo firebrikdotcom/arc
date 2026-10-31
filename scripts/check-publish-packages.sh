@@ -91,7 +91,9 @@ root, packages, version = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
 p = root / "Cargo.toml"
 s = p.read_text()
 for crate, old in [("arc-ffi", "../../.."), ("arc-core", "../../../../arc-core"), ("arc-stack", "../../../../arc-stack")]:
-    s = s.replace(f'path = "{old}"', f'path = "{packages / (crate + "-" + version)}"')
+    # Registry version: this run's patch.crates-io overrides apply to crates packaged now;
+    # crates already published resolve from crates.io, so one copy of each crate is used.
+    s = s.replace(f'path = "{old}"', f'version = "={version}"')
 p.write_text(s)
 p = root / "src/lib.rs"
 p.write_text(p.read_text().replace('../../../support/mod.rs', '../../support/mod.rs'))
