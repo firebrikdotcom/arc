@@ -21,7 +21,7 @@ policy and upgrade path that make "upgrade without starting from scratch" a stat
 instead of a hope.
 
 The published reusable crates share the workspace version (latest published
-0.8.11). Source now also includes the unpublished 0.8.12 candidates `arc-stack`
+0.8.11). Source now also includes the unpublished 0.9.0 candidates `arc-stack`
 and `arc-ffi`. `arc-stack` owns headless event-sourced stack assembly; `arc-web`
 is the web adapter and preserves its prior stack/config paths as re-exports;
 `arc-ffi` supplies native adapter infrastructure. `arc-app` (package `arc`) is
@@ -89,7 +89,7 @@ migrations (and always announced in release notes).
 **Boundary status.** Framework and application ownership is split across
 headless `arc-stack`, sibling web/native adapters, and the thin `arc-app` web
 template. The reusable source additions remain unpublished pending an
-authorized 0.8.12 release. The Android app migration to `arc-stack` + `arc-ffi`
+authorized 0.9.0 release. The Android app migration to `arc-stack` + `arc-ffi`
 is separate follow-up work:
 
 - Publish the `arc-stack` → `arc-web` and `arc-ffi` additions only in an authorized, validated lockstep release.
@@ -211,3 +211,5 @@ normative contract it implements.
   crates rather than clone-and-edit of this monorepo.
 - Add banner + freshness checks for `crates/arc-app/src/schema.rs` and `dist/` (Benthos generated
   config and the Arc-owned structural boundary under `crates/arc-app/src` are checked today).
+
+2026-10-31: the release is 0.9.0 (decision U-9).

@@ -1,6 +1,24 @@
 # Changelog
 
-## Unreleased — 0.8.12 candidate
+## Unreleased — 0.9.0
+
+### Breaking changes (Phase 2 security hardening)
+
+Details and migration steps: [Upgrading](docs/upgrading.md#phase-2-security-hardening-090--compatibility-notes).
+
+- The `/ws` handshake fails closed unless the app configures an origin
+  allowlist and a principal provider ([Upgrading](docs/upgrading.md#phase-2-security-hardening-090--compatibility-notes)).
+- Room subscriptions outside `user:<id>` are silently dropped
+  ([Upgrading](docs/upgrading.md#phase-2-security-hardening-090--compatibility-notes)).
+- Postgres `events.payload` is rewritten from JSONB to JSON at startup
+  ([Upgrading](docs/upgrading.md#phase-2-security-hardening-090--compatibility-notes)).
+- Event timestamps are stored at whole-second precision
+  ([Upgrading](docs/upgrading.md#phase-2-security-hardening-090--compatibility-notes)).
+
+### Added and changed
+
+- Phase 2 security hardening: WebSocket origin and identity authorization, and
+  projection event-origin controls (see `docs/phase-2-security-hardening.md`).
 
 - Add `arc new --android`, `arc doctor --android`, and
   `arc generate resource --ffi` for native Android app scaffolding.
@@ -21,4 +39,4 @@
   version, so competing writers queue instead of failing immediately. A lock
   held longer than 5 seconds can still fail. Journal mode remains unchanged;
   see [Upgrading](docs/upgrading.md). This behavior change is not yet released.
-- This candidate has not been published; release 0.8.12 needs authorization.
+- This candidate has not been published; release 0.9.0 needs authorization.

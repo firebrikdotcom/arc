@@ -2,7 +2,7 @@
 
 This guide creates a native Android application that uses Arc through UniFFI.
 It does not add a web server or copy the Android prototype into your project.
-The generated project uses local Arc crate paths until an authorized 0.8.12
+The generated project uses local Arc crate paths until an authorized 0.9.0
 release is published.
 
 ## Before you start

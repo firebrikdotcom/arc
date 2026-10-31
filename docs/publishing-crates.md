@@ -111,7 +111,7 @@ Do not publish adapter crates with direct database-writing Benthos behavior. Ben
 routing/delivery layer; Arc-owned code owns projection writes.
 
 `arc-stack` and `arc-ffi` are unpublished source additions at the current workspace
-version, intended for the coordinated 0.8.12 candidate. Keep the twelve already
+version, intended for the coordinated 0.9.0 release (all crates move together). Keep the twelve already
 published 0.8.11 packages distinct from the fourteen-package next-release inventory.
 The native adapter requires exact UniFFI 0.32.2; host binding generation is separate
 from its shipped dependencies. See [Native Adapters](ffi.md) for runtime, registry,

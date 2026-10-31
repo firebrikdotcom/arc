@@ -10,4 +10,4 @@ its UniFFI objects. A cancelled caller does not cancel or retry an already
 submitted operation; re-read authoritative state before resubmitting a write.
 
 See [Native Adapters](../../docs/ffi.md) and [ADR 0003](../../docs/architecture-decisions/0003-shared-stack-ui-adapters.md).
-The package is a 0.8.12 candidate and has not been published.
+The package is a 0.9.0 candidate and has not been published.
