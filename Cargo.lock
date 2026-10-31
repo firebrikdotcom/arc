@@ -737,7 +737,11 @@ dependencies = [
 name = "arc-web-cli"
 version = "0.8.11"
 dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
  "tera",
+ "toml",
 ]
 
 [[package]]

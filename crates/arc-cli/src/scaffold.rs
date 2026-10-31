@@ -206,7 +206,7 @@ fn render(template: &str, project: &NewProject) -> String {
     }
 }
 
-fn validate_name(name: &str) -> Result<(), String> {
+pub(crate) fn validate_name(name: &str) -> Result<(), String> {
     let mut chars = name.chars();
     let valid_first = chars
         .next()
@@ -221,7 +221,7 @@ fn validate_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn initialize_git(root: &Path) -> Result<(), String> {
+pub(crate) fn initialize_git(root: &Path) -> Result<(), String> {
     let status = Command::new("git")
         .args(["init", "--quiet"])
         .current_dir(root)

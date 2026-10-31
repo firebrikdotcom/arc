@@ -8,6 +8,10 @@ Create a self-contained application without cloning the Arc repository.
 - `make`
 - SQLite development libraries
 
+To create a native Android app, follow [Your first Android app](android.md).
+That guide covers the verified scaffold, FFI resource generation, emulator
+acceptance, and explicit in-place deployment.
+
 ## 1. Install the generator
 
 ```bash

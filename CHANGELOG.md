@@ -2,6 +2,9 @@
 
 ## Unreleased — 0.8.12 candidate
 
+- Add `arc new --android`, `arc doctor --android`, and
+  `arc generate resource --ffi` for native Android app scaffolding.
+
 - Add headless `arc-stack` for shared event-sourced stack assembly and retain
   the existing `arc-web` stack/config public paths as re-exports.
 - Add `arc-ffi` native adapter infrastructure with an owned async runtime,
