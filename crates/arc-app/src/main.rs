@@ -60,7 +60,6 @@ mod domain;
 
 // Re-export framework items under `crate::` so application routes/controllers
 // reference them by their familiar paths.
-pub use arc_web::websocket;
 pub use arc_web::AppState;
 
 /// The application's read-model projectors, registered against its aggregate.
