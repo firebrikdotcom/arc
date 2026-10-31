@@ -15,6 +15,10 @@ Details and migration steps: [Upgrading](docs/upgrading.md#phase-2-security-hard
 - Event timestamps are stored at whole-second precision
   ([Upgrading](docs/upgrading.md#phase-2-security-hardening-090--compatibility-notes)).
 
+### Fixed
+
+- `arc new` no longer lets inherited `GIT_DIR` and related variables (for example under a Git hook) redirect `git init` to the caller's repository.
+
 ### Added and changed
 
 - Phase 2 security hardening: WebSocket origin and identity authorization, and

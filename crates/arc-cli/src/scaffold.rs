@@ -221,10 +221,39 @@ pub(crate) fn validate_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Variables that make Git pick a repository other than the working directory.
+const GIT_REPOSITORY_ENV: [&str; 8] = [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_NAMESPACE",
+    "GIT_PREFIX",
+];
+
+/// Builds a `git` command that cannot be redirected to a caller's repository.
+/// `inherited` simulates variables of the parent environment (used by tests).
+fn isolated_git_command(root: &Path, inherited: &[(&str, &Path)]) -> Command {
+    let mut command = Command::new("git");
+    for (name, value) in inherited {
+        command.env(name, value);
+    }
+    for name in GIT_REPOSITORY_ENV {
+        command.env_remove(name);
+    }
+    command.current_dir(root);
+    command
+}
+
 pub(crate) fn initialize_git(root: &Path) -> Result<(), String> {
-    let status = Command::new("git")
+    git_init(root, &[])
+}
+
+fn git_init(root: &Path, inherited: &[(&str, &Path)]) -> Result<(), String> {
+    let status = isolated_git_command(root, inherited)
         .args(["init", "--quiet"])
-        .current_dir(root)
         .status()
         .map_err(|error| format!("could not run `git init`: {error}; retry with --no-git"))?;
     if !status.success() {
@@ -244,6 +273,29 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("arc-cli-test-{}-{nonce}", std::process::id()))
+    }
+
+    #[test]
+    fn git_init_ignores_inherited_repository_environment() {
+        let outer = temp_root();
+        let project = temp_root().with_extension("project");
+        fs::create_dir_all(&outer).unwrap();
+        fs::create_dir_all(&project).unwrap();
+        assert!(isolated_git_command(&outer, &[])
+            .args(["init", "--quiet"])
+            .status()
+            .unwrap()
+            .success());
+        let outer_git = outer.join(".git");
+        git_init(&project, &[("GIT_DIR", outer_git.as_path())]).unwrap();
+        assert!(project.join(".git").is_dir());
+        let bare = isolated_git_command(&outer, &[])
+            .args(["config", "--get", "core.bare"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&bare.stdout).trim(), "false");
+        fs::remove_dir_all(outer).unwrap();
+        fs::remove_dir_all(project).unwrap();
     }
 
     #[test]
