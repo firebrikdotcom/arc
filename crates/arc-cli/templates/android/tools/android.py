@@ -87,14 +87,6 @@ def sdk_tools(native=False):
                 fail("JDK 17 or newer not found; set JAVA_HOME to a JDK 17+ installation")
         except (FileNotFoundError, subprocess.CalledProcessError):
             fail("JDK 17 or newer not found; set JAVA_HOME to a JDK 17+ installation")
-
-
-def java_major(version):
-    match = re.search(r'(?<!\d)(\d+(?:\.\d+)*)(?!\d)', version)
-    if not match:
-        return 0
-    parts = [int(part) for part in match.group(1).split(".")]
-    return parts[1] if parts[0] == 1 and len(parts) > 1 else parts[0]
     if native:
         host_tools()
         if not shutil.which("cargo-ndk"):
@@ -110,6 +102,21 @@ def java_major(version):
         missing = sorted(set(("aarch64-linux-android", "x86_64-linux-android")) - set(installed))
         if missing:
             fail("Rust Android targets missing: " + ", ".join(missing) + "; run rustup target add aarch64-linux-android x86_64-linux-android")
+
+
+def java_major(version):
+    match = re.search(r'(?<!\d)(\d+(?:\.\d+)*)(?!\d)', version)
+    if not match:
+        return 0
+    parts = [int(part) for part in match.group(1).split(".")]
+    return parts[1] if parts[0] == 1 and len(parts) > 1 else parts[0]
+
+
+def emulator_tool(sdk):
+    candidate = sdk / "emulator" / ("emulator.exe" if os.name == "nt" else "emulator")
+    if candidate.is_file():
+        return candidate
+    return shutil.which("emulator")
 
 
 def rust():
@@ -130,6 +137,10 @@ def device_ready(serial, emulator=False):
     refusal = "e2e-emulator requires a running Android emulator; physical devices are forbidden"
     if emulator and not serial.startswith("emulator-"):
         fail(refusal)
+    if emulator:
+        sdk = Path(os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or Path.home() / "Android/Sdk")
+        if not emulator_tool(sdk):
+            fail("Android emulator tool not found; install Android SDK emulator and add it to PATH")
     if not shutil.which("adb"):
         fail("adb not found; install Android SDK platform-tools and add them to PATH")
     try:

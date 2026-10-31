@@ -307,7 +307,16 @@ fn diagnostics(probe: &impl Probe) -> Vec<String> {
             "ERROR: adb not found; install Android SDK platform-tools and add them to PATH".into(),
         );
     }
-    if probe.command("emulator", &["-version"]).is_none() {
+    let emulator = sdk.join("emulator/emulator");
+    let emulator_version = if probe.file(&emulator) {
+        emulator
+            .to_str()
+            .and_then(|path| probe.command(path, &["-version"]))
+    } else {
+        None
+    }
+    .or_else(|| probe.command("emulator", &["-version"]));
+    if emulator_version.is_none() {
         result.push("ERROR: Android emulator tool not found; install Android SDK emulator and add it to PATH".into());
     }
     let device = probe
@@ -821,5 +830,28 @@ mod tests {
             .insert("/jdk/bin/javac -version".into(), "javac 17.0.1".into());
         f.env.insert("E2E_DEVICE".into(), "emulator-5590".into());
         assert_eq!(diagnostics(&f), vec!["WARN: emulator-5590 is not ready; start an AVD before make e2e-emulator or set E2E_DEVICE"]);
+    }
+
+    #[test]
+    fn doctor_finds_emulator_in_sdk_before_path_fallback() {
+        let mut f = ready();
+        f.commands.remove("emulator -version");
+        f.files
+            .insert("/sdk/emulator/emulator".into(), String::new());
+        f.commands.insert(
+            "/sdk/emulator/emulator -version".into(),
+            "Android emulator version".into(),
+        );
+        assert!(diagnostics(&f).is_empty());
+
+        f.commands.remove("/sdk/emulator/emulator -version");
+        assert!(diagnostics(&f)
+            .iter()
+            .any(|message| message.contains("emulator tool")));
+        f.commands.insert(
+            "emulator -version".into(),
+            "Android emulator version".into(),
+        );
+        assert!(diagnostics(&f).is_empty());
     }
 }
