@@ -11,14 +11,12 @@ import NotificationController from "./controllers/notification_controller";
 import SessionNotificationController from "./controllers/session_notification_controller";
 import ProfileFormController from "./controllers/profile_form_controller";
 import PasswordFormController from "./controllers/password_form_controller";
-import WebSocketController from "./controllers/websocket_controller";
 
 // Register controllers
 application.register("notification", NotificationController);
 application.register("session-notification", SessionNotificationController);
 application.register("profile-form", ProfileFormController);
 application.register("password-form", PasswordFormController);
-application.register("websocket", WebSocketController);
 
 // Make Toastify available globally for notifications
 window.Toastify = Toastify;

@@ -37,7 +37,7 @@ async fn projection_requires_persisted_unchanged_event_and_is_idempotent() {
     .run();
     let handle = server.handle();
     actix_web::rt::spawn(server);
-    let event = Event::new(NewEvent { aggregate_type: "User", aggregate_id: "persisted", sequence: 1, event_type: "UserRegistered", payload: serde_json::json!({"name":"Ada", "email":"ada@example.test", "password_hash":"persisted-hash"}) }).with_audit(AuditMetadata::test_default());
+    let event = Event::new(NewEvent { aggregate_type: "User", aggregate_id: "persisted", sequence: 1, event_type: "UserRegistered", payload: serde_json::json!({"name":"Ada", "email":"ada@example.test", "password_hash":"persisted-hash"}) }).with_audit(AuditMetadata::test_default()).with_stored_timestamp_precision();
     event_store
         .append_to(
             "User",

@@ -1335,7 +1335,22 @@ mod tests {
             Some(original)
         );
 
+        // Once applied, the startup check is a catalog lookup: the table keeps
+        // its storage file, so no rewrite and no long ACCESS EXCLUSIVE lock.
+        let relfilenode = "SELECT relfilenode::text FROM pg_class WHERE oid = 'events'::regclass";
+        let storage_before: String = sqlx::query_scalar(relfilenode)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
         store.initialize_schema().await.unwrap();
+        let storage_after: String = sqlx::query_scalar(relfilenode)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(
+            storage_after, storage_before,
+            "an applied payload migration must not rewrite the events table"
+        );
         let mut precise = stamped_event(
             "Upgrade",
             "signed-jsonb-upgrade",
