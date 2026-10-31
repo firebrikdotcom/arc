@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 type TestResult = Result<(), Box<dyn Error + Send + Sync>>;
 
-const DOCKER_PROJECT_LABEL: &str = "arc.project=nineties";
+const DOCKER_PROJECT_LABEL: &str = "arc.project=arc";
 const DOCKER_TEST_LABEL: &str = "arc.test=benthos_projection_routing";
 
 struct ChildProcess {
@@ -234,7 +234,7 @@ fn docker_image_available(image: &str) -> bool {
 }
 
 fn docker_container_name(role: &str) -> String {
-    format!("arc-nineties-{role}-{}", Uuid::new_v4().simple())
+    format!("arc-test-{role}-{}", Uuid::new_v4().simple())
 }
 
 fn remove_docker_container(container: &str) {

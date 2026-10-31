@@ -104,7 +104,7 @@ default `status_code()` (500) even when its custom `error_response()` emits 503.
 Consumers inspecting that trait method directly should not infer the wire status.
 This pre-existing general error-API inconsistency is outside the bounded wrapper fix.
 Exact commands and results
-are recorded in `/tmp/nineties-access-log-review-report.md` for this lane.
+are recorded in `/tmp/arc-access-log-review-report.md` for this lane.
 
 ## Durable implementation update — 2026-09-14
 
@@ -208,5 +208,5 @@ needed. The runner builds its verifier from the checked-in Dockerfile (Rust 1.90
 and native SQLite/OpenSSL dependencies) and uses Cargo `--locked`; no private
 prebuilt image is required. The default cache is the checkout’s `target/verification-cache` on disk.
 Port 18784 must be free. Test receipts are written to
-`/tmp/arc-nineties-durable-audit-receipt.json` (override
+`/tmp/arc-test-durable-audit-receipt.json` (override
 `ARC_AUDIT_RECEIPT` for another lane).

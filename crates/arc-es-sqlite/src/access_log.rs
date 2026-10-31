@@ -171,7 +171,7 @@ mod tests {
     struct Journal(PathBuf);
     impl Journal {
         fn new() -> Self {
-            Self(std::env::temp_dir().join(format!("arc-nineties-audit-{}.db", Uuid::new_v4())))
+            Self(std::env::temp_dir().join(format!("arc-test-audit-{}.db", Uuid::new_v4())))
         }
         async fn open(&self) -> SqliteAccessLogger {
             SqliteAccessLogger::open(self.0.clone(), AccessLogPrivacy::default(), 25)

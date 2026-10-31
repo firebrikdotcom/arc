@@ -62,7 +62,7 @@ Commands below are defined in the [Makefile](https://github.com/lotharthesavior/
 and [Security workflow](https://github.com/lotharthesavior/arc/blob/c6cc0d7736dfabccb9434890b58983aa545e5a8e/.github/workflows/security.yml).
 Record exact invocation, exit status, test counts and skips. Run backend tests and static analysis
 inside a Docker Compose verification service with the candidate toolchain and dependencies,
-unique `arc-nineties-<lane>` project/container names, `arc.project=nineties` labels, isolated
+unique `arc-test-<lane>` project/container names, `arc.project=arc` labels, isolated
 DB/storage and cleanup on success/failure/timeout. The reference runtime image is not a test service.
 Do not start the shared reference stack or reuse another lane's volumes/ports.
 
