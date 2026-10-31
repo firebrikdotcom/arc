@@ -27,7 +27,7 @@ async fn apply(connection: &mut sqlx::SqliteConnection) -> Result<(), FfiError> 
             let applied: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM arc_schema_migrations WHERE version = ?")
                 .bind(version).fetch_one(&mut *connection).await?;
             if applied == 0 {
-                sqlx::raw_sql(sql).execute(&mut *connection).await?;
+                connection.execute(*sql).await?;
                 sqlx::query("INSERT INTO arc_schema_migrations (version) VALUES (?)")
                     .bind(version).execute(&mut *connection).await?;
             }
