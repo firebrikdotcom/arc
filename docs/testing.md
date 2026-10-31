@@ -1,5 +1,25 @@
 # Testing
 
+## Android scaffold acceptance
+
+The repository script generates a temporary Android app, creates two FFI
+resources, and runs binding generation, Rust/JVM tests, APK build, and
+dependency-isolation checks:
+
+```bash
+bash scripts/check-android-scaffold.sh
+```
+
+To include emulator instrumentation and the in-place reinstall persistence
+check, select an emulator explicitly:
+
+```bash
+ARC_ANDROID_E2E=1 E2E_DEVICE=emulator-5580 bash scripts/check-android-scaffold.sh
+```
+
+The opt-in mode rejects physical device serials. Without the opt-in, emulator
+instrumentation is reported as not run.
+
 ## Run project checks
 
 ```bash

@@ -23,15 +23,23 @@ observability, and developer experience.
 This is the canonical project-status and roadmap tracker. Current source code and accepted ADRs
 take precedence when a claim here becomes stale.
 
-## Android scaffold (U-4, Q-17/Q-17a) — in progress — 2026-10-30
+## Android scaffold (U-4, Q-17/Q-17a) — implementation verified; PR/CI pending — 2026-10-30
 
 - The milestone adds `arc new --android`, FFI resource generation, Android
   toolchain diagnosis, and generated-project build/test/deploy targets. The
   settled contract is in [ADR 0004](docs/architecture-decisions/0004-android-scaffold.md).
-- T2a (CLI/scaffold) is underway; T2b (native resources) follows, then T2c
-  (acceptance tests/CI). T2d documentation is drafted ahead of those tasks;
-  command behavior and outputs remain to verify against the tested CLI and
-  emulator.
+- T2a (CLI/scaffold), T2b (native resources), and T2c (acceptance tests/CI)
+  passed their reported checks. T2d documentation records the observed CLI,
+  generated project, toolchain, APK sizes, emulator flows, and reinstall
+  persistence check. Final merge, pull request, and green CI remain pending.
+- The coordinator verified the generated flow with JDK 21, NDK 27, and
+  `emulator-5580` (Medium_Phone_API_36.1): empty project creation, Note and Tag
+  FFI generation, bindings, Rust/JVM tests, debug build (~36 MB), and three
+  real-FFI instrumented flows. Empty-project APK measured ~28 MB.
+- T2c verified the scaffold script in default and emulator modes (five
+  instrumentation tests plus in-place reinstall persistence), the generated
+  host integration test, and the Android scaffold CI workflow. Emulator mode
+  refuses physical serials. JDK 17 or newer is required.
 - 0.8.12 publication remains unauthorized. Until a release is separately
   approved and available, generated projects require a matching local Arc
   checkout and use its recorded path dependencies.

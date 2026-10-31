@@ -8,7 +8,7 @@ release is published.
 ## Before you start
 
 Use Linux with a matching Arc checkout. Android builds need the Rust toolchain
-and Android Rust targets, `cargo-ndk`, Java 17, Android SDK platform 36,
+and Android Rust targets, `cargo-ndk`, JDK 17 or newer, Android SDK platform 36,
 build-tools 35.0.0, NDK 27.0.12077973, `adb`, and the Android emulator tools.
 Start an Android Virtual Device before the emulator test. `arc doctor --android`
 checks these tools without installing anything or downloading packages. It
@@ -24,21 +24,21 @@ keep it available while building.
 ## Create, build, and test
 
 Run these commands in order from a working directory where you want the new
-project. The Android scaffold and these commands are **to verify** against the
-completed CLI and emulator acceptance run.
+project. This sequence was verified with JDK 21, NDK 27, and the
+`emulator-5580` Medium_Phone_API_36.1 virtual device.
 
 ```bash
-export ARC_PATH=/home/savior/Code/Studies/nineties-android-scaffold
+export ARC_PATH=/path/to/arc-checkout
 cargo install --path "$ARC_PATH/crates/arc-cli" --locked --force
 arc doctor --android
-arc new my-notes --android
-cd my-notes
+arc new smoke-notes --android --arc-path "$ARC_PATH" --no-git
+cd smoke-notes
 arc generate resource Note --ffi
+arc generate resource Tag --ffi
 make bindings
 make test
 make build
 make e2e-emulator E2E_DEVICE=emulator-5580
-make deploy DEVICE=emulator-5580
 ```
 
 `cargo install` uses the local CLI source. It does not install an unpublished
@@ -46,8 +46,10 @@ CLI version from crates.io. `arc new` creates the Android project and its
 manifest. `arc generate resource` adds a native resource; resource names use
 the same validation and normalization rules as Arc's other resource
 generators. `make bindings` generates Kotlin bindings for the app and
-`arc-ffi`. `make test` runs the Rust and Kotlin unit tests. `make build` builds
-Rust libraries for both Android ABIs and assembles the debug APK.
+`arc-ffi`. `make test` runs the Rust and JVM unit tests. `make build` builds Rust
+libraries for both Android ABIs and assembles the debug APK. In the verified
+resource project, the debug APK was about 36 MB; an empty project APK was about
+28 MB. These are observed reference sizes, not size guarantees.
 
 `make e2e-emulator` instruments an Android emulator only. Its default device is
 `emulator-5580`; the command checks that the selected device is a ready
@@ -56,9 +58,8 @@ emulator, set `E2E_DEVICE` to its serial.
 
 `make deploy` is separate from emulator testing. It requires an explicit
 connected device serial and performs an in-place install, launch and
-package/version check. The example above installs to the emulator. To install
-on a physical device, replace the value with that device's serial only when you
-intend to install there. Deployment does not run instrumentation, uninstall
+package/version check. To deploy, run `make deploy DEVICE=<serial>` only for a
+device you intend to update. Deployment does not run instrumentation, uninstall
 the app, or clear its data. Do not use `adb uninstall` or clear application
 storage as part of an update.
 
@@ -85,3 +86,10 @@ uncertain after an error, check the stored state before trying again.
 
 For framework-level native adapter details, see [Native Adapters](ffi.md).
 For the overall application creation path, see [Getting started](getting-started.md).
+
+
+The repository acceptance script can also exercise the scaffold. Its default
+mode runs host checks and builds without emulator instrumentation;
+`ARC_ANDROID_E2E=1 E2E_DEVICE=emulator-5580 bash scripts/check-android-scaffold.sh`
+adds emulator tests and an in-place reinstall persistence check. Physical device
+serials are refused in that mode.

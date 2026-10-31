@@ -68,7 +68,7 @@ tests. Kotlin application sources use the generated package. Rust JNI output
 and generated UniFFI bindings stay under `app/build/`.
 
 The reference pins Gradle 8.13, Android Gradle Plugin 8.10.1, Kotlin/Compose
-plugin 2.1.0, SDK 36, build tools 35.0.0, min SDK 30, Java/JVM 17, NDK
+plugin 2.1.0, SDK 36, build tools 35.0.0, min SDK 30, JDK 17 or newer with Java/JVM target 17, NDK
 27.0.12077973, and `arm64-v8a` plus `x86_64`. UniFFI is exactly 0.32.2: the
 Android library disables default features and CLI support; the separate host
 bindgen tool uses the CLI and cargo-metadata features. The project is
@@ -154,18 +154,30 @@ dependencies available.
 | T2d | User documentation and roadmap. | `make docs-check`; documented commands exercised against tested CLI and emulator. |
 
 The coordinator merges in dependency order, runs combined mandatory checks and
-records CI. This documentation draft is prepared before implementation is
-complete; command behavior and tool output not yet observed remain **to
-verify**. No reference-app changes, publication, or device installation are
+records CI. No reference-app changes, publication, or device installation are
 included in this task.
 
 ## Follow-ups
 
-- Complete T2a, T2b and T2c, then verify this guide's commands against the
-  generated CLI and an actual emulator.
 - Revisit registry dependencies only after a separately authorized 0.8.12
   release.
 - Keep app migration and any installation of the reference app outside this
   scaffold milestone.
 
 ## Implementation record
+
+The coordinator verified the generated workflow on this machine with JDK 21,
+NDK 27, and `emulator-5580` (Medium_Phone_API_36.1): `arc new smoke-notes
+--android --arc-path <checkout> --no-git`; `arc generate resource Note --ffi`;
+`arc generate resource Tag --ffi`; `make bindings`; `make test` (Rust and JVM
+tests passed); `make build` (debug APK about 36 MB; empty-project APK about
+28 MB); and `make e2e-emulator E2E_DEVICE=emulator-5580` (chooser, Note, and Tag
+instrumented flows passed through real FFI).
+
+T2c also verified `scripts/check-android-scaffold.sh` in default mode and with
+`ARC_ANDROID_E2E=1 E2E_DEVICE=emulator-5580` (five instrumentation tests and
+an in-place reinstall persistence check), the host integration test
+`crates/arc-cli/tests/android_generated.rs`, and
+`.github/workflows/android-scaffold.yml`. Emulator acceptance refuses physical
+serials. The generated CLI help was checked against the built CLI; its command
+reference is in [Your first Android app](../android.md).
