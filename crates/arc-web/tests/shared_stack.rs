@@ -331,3 +331,58 @@ async fn supplied_stack_rejects_non_in_process_event_bus() {
     );
     let _ = std::fs::remove_file(path);
 }
+
+struct Other;
+#[async_trait]
+impl Aggregate for Other {
+    type Command = Create;
+    type Event = ();
+    type Error = ItemError;
+    fn aggregate_type() -> &'static str {
+        "Other"
+    }
+    fn version(&self) -> i64 {
+        0
+    }
+    async fn handle(&self, _command: Create) -> Result<Vec<Event>, ItemError> {
+        Ok(Vec::new())
+    }
+    fn apply(&mut self, _event: &Event) {}
+}
+impl Default for Other {
+    fn default() -> Self {
+        Other
+    }
+}
+
+#[actix_web::test]
+async fn supplied_stack_event_bus_error_is_independent_of_registration_order() {
+    let _guard = ENV_LOCK.lock().await;
+    let path =
+        std::env::temp_dir().join(format!("arc-shared-order-{}.sqlite", uuid::Uuid::new_v4()));
+    let stack = create_stack(&path).await;
+    let _env = env_guard::EnvGuard::new(&[
+        ("EVENT_BUS", Some("nats")),
+        ("DATABASE_URL", path.to_str()),
+        (
+            "SECRET_KEY",
+            Some("0123456789012345678901234567890123456789012345678901234567890123"),
+        ),
+    ]);
+    let error = ArcApp::builder()
+        .register_aggregate::<Other>()
+        .register_aggregate_with_stack(stack)
+        .register_routes(|cfg| {
+            cfg.route("/items/{id}", web::get().to(read));
+        })
+        .serve("127.0.0.1".into(), 0)
+        .await
+        .expect_err("a supplied stack must not start under EVENT_BUS=nats");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    let message = error.to_string();
+    assert!(
+        message.contains("aggregate Item") && message.contains("EVENT_BUS"),
+        "{message}"
+    );
+    let _ = std::fs::remove_file(path);
+}
