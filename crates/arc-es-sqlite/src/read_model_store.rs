@@ -57,16 +57,21 @@ impl SqliteReadModelStore {
     /// Build a new store from a database URL. Creates a small r2d2 pool.
     pub async fn new(database_url: &str) -> ReadModelResult<Self> {
         let manager = ConnectionManager::<SqliteConnection>::new(database_url);
-        let pool = Pool::builder().max_size(10).build(manager).map_err(|e| {
-            ReadModelError::other(format!("Failed to build read-model pool: {}", e))
-        })?;
+        let pool = Pool::builder()
+            .max_size(10)
+            .connection_customizer(Box::new(crate::connection::BusyTimeout))
+            .build(manager)
+            .map_err(|e| {
+                ReadModelError::other(format!("Failed to build read-model pool: {}", e))
+            })?;
         Ok(SqliteReadModelStore {
             pool: Arc::new(pool),
         })
     }
 
     /// Build a store from an existing pool. Used in tests so we can share a
-    /// single in-memory database with the event store.
+    /// single in-memory database with the event store. Callers must configure a
+    /// bounded busy timeout on every new/replacement connection themselves.
     pub fn with_pool(pool: Pool) -> Self {
         Self {
             pool: Arc::new(pool),
@@ -606,5 +611,19 @@ mod tests {
             .unwrap();
         assert_eq!(page.rows.len(), 1);
         assert!(page.has_next);
+    }
+}
+
+#[cfg(test)]
+mod connection_tests {
+    #[tokio::test]
+    async fn read_model_pool_configures_initial_and_replacement_connections() {
+        let path = std::env::temp_dir().join(format!("arc-pool-{}.db", uuid::Uuid::new_v4()));
+        let store = super::SqliteReadModelStore::new(path.to_str().unwrap())
+            .await
+            .unwrap();
+        crate::connection::assert_timeout_on_replacement(&store.pool);
+        drop(store);
+        std::fs::remove_file(path).unwrap();
     }
 }

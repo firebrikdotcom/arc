@@ -59,7 +59,7 @@ impl Projector for Count {
     }
     async fn apply(&self, event: &Event, store: &dyn ReadModelStore) -> ProjectionResult<()> {
         self.0.fetch_add(1, Ordering::SeqCst);
-        store.upsert(Upsert::new("items", &event.aggregate_id, serde_json::json!({"id": event.aggregate_id, "version": event.sequence, "data": "visible"}))).await.map_err(|_| arc_core::projection::ProjectionError::Other { message: "fixture write failed".into() })?;
+        store.upsert(Upsert::new("items", &event.aggregate_id, serde_json::json!({"id": event.aggregate_id, "version": event.sequence, "data": "visible"}))).await.map_err(|error| arc_core::projection::ProjectionError::ReadModelError { name: self.name().into(), message: error.to_string() })?;
         Ok(())
     }
 }
