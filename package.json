@@ -1,4 +1,5 @@
 {
+  "name": "arc",
   "devDependencies": {
     "@playwright/test": "^1.59.1",
     "vite": "^6.0.7",
