@@ -24,6 +24,7 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           accept-android-sdk-licenses: false
+          packages: 'platform-tools'
       - uses: Swatinem/rust-cache@v2
       - uses: gradle/actions/setup-gradle@v4
       - run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0' 'ndk;27.0.12077973' 'emulator'
