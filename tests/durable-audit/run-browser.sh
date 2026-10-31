@@ -4,7 +4,7 @@ cd "$(dirname "$0")/../.."
 project="${ARC_AUDIT_TEST_PROJECT:-arc-test-durable-browser}"
 compose=(docker compose -p "$project" -f tests/durable-audit/compose.yml)
 receipt_dir=""
-cleanup() { "${compose[@]}" down --remove-orphans; [ -n "$receipt_dir" ] && rm -rf "$receipt_dir"; }
+cleanup() { "${compose[@]}" down --remove-orphans; if [ -n "$receipt_dir" ]; then rm -rf "$receipt_dir"; fi; }
 trap cleanup EXIT
 trap "exit 130" INT
 trap "exit 143" TERM
