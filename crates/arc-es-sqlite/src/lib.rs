@@ -27,6 +27,8 @@ use uuid::Uuid;
 // Re-export for convenience
 pub use arc_core::{Deserialize, Serialize};
 
+mod connection;
+
 pub mod access_log;
 pub use access_log::{AccessLogPrivacy, SqliteAccessLogger};
 
@@ -259,6 +261,7 @@ impl SqliteEventStore {
         let manager = ConnectionManager::<SqliteConnection>::new(database_url);
         let pool = Pool::builder()
             .max_size(10)
+            .connection_customizer(Box::new(connection::BusyTimeout))
             .build(manager)
             .map_err(|e| EventStoreError::database(format!("Failed to create pool: {}", e)))?;
 
@@ -281,6 +284,8 @@ impl SqliteEventStore {
         Ok(store)
     }
 
+    /// Use a caller-configured pool. The caller must set a bounded busy timeout
+    /// on every new/replacement connection; this constructor does not alter it.
     pub fn with_pool(pool: Pool) -> Self {
         SqliteEventStore {
             pool: Arc::new(pool),
@@ -288,6 +293,8 @@ impl SqliteEventStore {
         }
     }
 
+    /// Like `with_pool`, preserves caller connection configuration, including
+    /// responsibility for a bounded busy timeout on replacement connections.
     pub fn with_pool_and_integrity_key(
         pool: Pool,
         key: impl Into<Vec<u8>>,
@@ -466,7 +473,9 @@ impl EventStore for SqliteEventStore {
                 EventStoreError::database(format!("Failed to get connection: {}", e))
             })?;
 
-            AnsiTransactionManager::begin_transaction(&mut *conn)
+            // Reserve the writer before reading the version: a deferred read-to-write
+            // upgrade can fail immediately even with a busy timeout.
+            AnsiTransactionManager::begin_transaction_sql(&mut *conn, "BEGIN IMMEDIATE")
                 .map_err(|e| EventStoreError::database(e.to_string()))?;
 
             let result = (|| -> EventStoreResult<()> {
@@ -533,17 +542,16 @@ impl EventStore for SqliteEventStore {
                 Ok(())
             })();
 
-            match result {
-                Ok(_) => {
-                    AnsiTransactionManager::commit_transaction(&mut *conn)
-                        .map_err(|e| EventStoreError::database(e.to_string()))?;
-                    Ok(())
-                }
-                Err(e) => {
-                    let _ = AnsiTransactionManager::rollback_transaction(&mut *conn);
-                    Err(e)
-                }
+            // Preserve the body/commit error. COMMIT can fail (for example while
+            // an external reader holds a shared lock) and leave a transaction open.
+            let result = result.and_then(|()| {
+                AnsiTransactionManager::commit_transaction(&mut *conn)
+                    .map_err(|e| EventStoreError::database(e.to_string()))
+            });
+            if result.is_err() {
+                connection::rollback_append(&mut conn);
             }
+            result
         })
         .await
         .map_err(|e| EventStoreError::other(format!("Task join error: {}", e)))?
@@ -1840,5 +1848,19 @@ mod tests {
         let loaded = store.load_snapshot("agg-2").await.unwrap().unwrap();
         assert_eq!(loaded.version, 9);
         assert_eq!(loaded.state["v"], 9);
+    }
+}
+
+#[cfg(test)]
+mod connection_tests {
+    #[tokio::test]
+    async fn event_pool_configures_initial_and_replacement_connections() {
+        let path = std::env::temp_dir().join(format!("arc-pool-{}.db", uuid::Uuid::new_v4()));
+        let store = super::SqliteEventStore::new(path.to_str().unwrap())
+            .await
+            .unwrap();
+        super::connection::assert_timeout_on_replacement(&store.pool);
+        drop(store);
+        std::fs::remove_file(path).unwrap();
     }
 }

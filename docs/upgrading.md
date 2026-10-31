@@ -11,10 +11,12 @@ practical procedure.
 ## Ownership in one paragraph
 
 - **Framework (Arc-owned, consumed by version):** `arc-core`, `arc-es-sqlite`,
-  `arc-es-postgres`, `arc-es-nats`, and `arc-web`. `arc-web` holds the web/runtime
-  machinery — Actix bootstrap, middleware, session/JWT helpers, the websocket
-  transport, and the generic event-sourced stack `EsStack<A>`. It is **generic
-  over your aggregate** and ships no concrete domain type. Never hand-edit these.
+  `arc-es-postgres`, `arc-es-nats`, `arc-stack`, `arc-web`, and `arc-ffi`.
+  `arc-stack` owns headless generic event-sourced stack assembly; `arc-web` is
+  the Actix web adapter and keeps its prior stack/config imports as re-exports;
+  `arc-ffi` supplies native async runtime and registry infrastructure. The
+  Android app uses FFI only; web UIs are for web deployments. Never hand-edit
+  these framework crates in an application.
 - **Your app (`crates/arc-app`, package `arc`):** your domain aggregates,
   services, validation, controllers, routes, templates, and seeders. You plug
   them into the framework through
@@ -50,7 +52,7 @@ source:
    workspace) to the new version. Arc releases the `arc-*` crates in lockstep,
    so move them together.
    ```bash
-   cargo update -p arc-web -p arc-core -p arc-es-sqlite
+   cargo update -p arc-web -p arc-stack -p arc-ffi -p arc-core -p arc-es-sqlite
    ```
 2. **Run migrations** — framework-shipped Diesel migrations are forward-only.
    ```bash
@@ -75,6 +77,20 @@ revert the edit rather than working around it; hand-edits to Arc-owned files
 void the upgrade promise.
 
 ## Compatibility notes
+
+The `arc-web::helpers::es_stack` and related public config paths remain
+source-compatible re-exports of `arc-stack` items. The extraction is additive;
+the 0.8.12 candidate has not been published. `arc-ffi` is a native adapter and
+does not imply an Android web UI.
+
+The 0.8.12 SQLite behavior change sets a 5-second busy timeout on every new or
+replacement event-store and read-model connection. Appends acquire an IMMEDIATE
+write transaction before reading the current version, so competing writers
+queue instead of failing immediately. A write waits while another connection
+holds the lock; it can still fail if the lock remains held longer than 5
+seconds, such as during a long transaction or by another process. Journal mode
+is unchanged (WAL is not enabled). This changes contention latency and lock
+acquisition behavior; it is implemented in the unpublished 0.8.12 candidate.
 
 - **SemVer:** `0.x` releases move in lockstep. A patch bump is compatible; a
   minor bump may break the public API surface defined in ADR 0002.

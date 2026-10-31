@@ -47,6 +47,9 @@ Server-rendered UI with Tera views and browser assets:
 arc new my-app --ui
 ```
 
+`--ui` creates a web UI for the generated web application. The Android app uses
+the native FFI adapter; web UIs are for web deployments.
+
 Arc initializes a Git repository by default without creating a commit. Pass `--no-git` to skip it.
 
 ## 3. Set up and run

@@ -40,12 +40,12 @@ pub(crate) struct BuiltAggregateRuntime {
 }
 
 impl BuiltAggregateRuntime {
-    fn new<A: Aggregate + 'static>(
-        command_bus: CommandBus<A>,
+    pub(crate) fn new<A: Aggregate + 'static>(
+        command_bus: Arc<CommandBus<A>>,
         read_model_store: Arc<dyn arc_core::read_model_store::ReadModelStore>,
         projection_engine: Arc<ProjectionEngine>,
     ) -> Self {
-        let command_bus_data = web::Data::new(command_bus);
+        let command_bus_data = web::Data::from(command_bus);
         let read_model_store_data = web::Data::from(read_model_store);
         let projection_engine_data = web::Data::from(projection_engine);
 
@@ -118,9 +118,26 @@ pub(crate) async fn build_aggregate_runtime<A: Aggregate + 'static>(
     );
 
     Ok(BuiltAggregateRuntime::new(
-        command_bus,
+        Arc::new(command_bus),
         read_model_store,
         projection_engine,
+    ))
+}
+
+/// Reject a caller-supplied stack unless `EVENT_BUS` selects the in-process bus.
+/// Every `arc_stack::es_stack` builder wires an in-process bus, so under another bus
+/// the stack's events would never reach it and durable handlers would never run.
+pub(crate) fn ensure_supplied_stack_event_bus(aggregate_type: &str) -> io::Result<()> {
+    if event_bus_mode() == EventBusMode::InProcess {
+        return Ok(());
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!(
+            "aggregate {aggregate_type} is registered with register_aggregate_with_stack, \
+             which supports only the in-process event bus; unset EVENT_BUS or set \
+             EVENT_BUS=inprocess (EVENT_BUS=nats requires register_aggregate::<A>())"
+        ),
     ))
 }
 
@@ -178,6 +195,13 @@ pub(crate) async fn run(
     let driver = DatabaseDriver::from_env();
     info!(driver = driver.as_str(), "Selected database driver");
 
+    // Check every supplied stack before any registration builds or connects to
+    // NATS, so the error does not depend on registration order.
+    for registration in &registrations {
+        if registration.supplied_stack {
+            ensure_supplied_stack_event_bus(registration.aggregate_type)?;
+        }
+    }
     let mut aggregate_runtimes = Vec::with_capacity(registrations.len());
     for registration in registrations {
         info!(
@@ -444,7 +468,7 @@ mod tests {
             .await
             .unwrap();
         let command_bus = CommandBus::<A>::new(Box::new(event_store), Box::new(bus));
-        BuiltAggregateRuntime::new(command_bus, read_model_store, engine)
+        BuiltAggregateRuntime::new(Arc::new(command_bus), read_model_store, engine)
     }
 
     #[post("/products")]

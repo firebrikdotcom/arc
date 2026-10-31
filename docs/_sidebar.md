@@ -9,6 +9,7 @@
   * [Add an Endpoint](endpoints.md)
   * [Build a Resource](resources.md)
   * [Add a UI Page](ui.md)
+  * [Native Adapters](ffi.md)
   * [Configuration](configuration.md)
   * [Testing](testing.md)
 
@@ -44,6 +45,7 @@
 * Architecture Decisions
   * [ADR 0001: Benthos Routing](architecture-decisions/0001-benthos-only-event-routing.md)
   * [ADR 0002: Upgrade Contract](architecture-decisions/0002-framework-upgrade-contract.md)
+  * [ADR 0003: Shared Stack UI Adapters](architecture-decisions/0003-shared-stack-ui-adapters.md)
 
 * Help
   * [Troubleshooting](troubleshooting.md)

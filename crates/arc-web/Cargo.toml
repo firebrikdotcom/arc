@@ -15,7 +15,7 @@ path = "src/lib.rs"
 default = ["sqlite"]
 sqlite = []
 nats = ["dep:arc-es-nats"]
-postgres = ["dep:arc-es-postgres"]
+postgres = ["arc-stack/postgres"]
 # Exposes test-only helpers (e.g. connection-pool reset) to downstream crates
 # that need them in their own test suites.
 test-utils = []
@@ -24,9 +24,9 @@ test-utils = []
 arc-auth-core = { path = "../arc-auth-core", version = "0.8.11" }
 # Workspace crates
 arc-core = { path = "../arc-core", version = "0.8.11" }
+arc-stack = { path = "../arc-stack", version = "0.8.11", default-features = false, features = ["sqlite"] }
 arc-es-sqlite = { path = "../arc-es-sqlite", version = "0.8.11" }
 arc-es-nats = { path = "../arc-es-nats", version = "0.8.11", optional = true }
-arc-es-postgres = { path = "../arc-es-postgres", version = "0.8.11", optional = true }
 
 # Web framework
 actix-web.workspace = true
