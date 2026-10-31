@@ -43,7 +43,7 @@ The oracle decisions for this framework change are also settled:
 - **Q-2:** Add `SharedStack<A>` containing an `Arc<CommandBus<A>>` plus the existing shared read-model-store and projection-engine handles. Convert an `EsStack<A>` into it and make it cloneable without `A: Clone`. Add `register_aggregate_with_stack::<A>(stack) -> Self`. Reject any subsequent projector or snapshot-policy configuration for that registration immediately with a descriptive panic, including an empty projector list and `snapshot_policy(None)`. The caller owns projection rebuilding.
 - **Q-3:** Preserve all existing public signatures, including the public `EsStack` fields and `es_stack::build`. Keep `BuiltAggregateRuntime` crate-private. The new runtime path accepts the shared bus and injects it with `web::Data::from`.
 - **Q-4:** Add `es_stack::build_with_driver` with the signature specified below. Existing `build` delegates using `DatabaseDriver::from_env()` so current behavior is preserved.
-- **Q-5:** The app experiment uses path dependencies to the matching local `arc-web` and `arc-core` sources, avoiding duplicate incompatible core types. The intended additive release target is 0.8.12 after validation; recheck registry availability before any publication. Publication is not authorized by this ADR.
+- **Q-5:** The app experiment uses path dependencies to the matching local `arc-web` and `arc-core` sources, avoiding duplicate incompatible core types. The intended release target is 0.9.0 (the additions stay additive) after validation; recheck registry availability before any publication. Publication is not authorized by this ADR.
 - **Q-6:** App-side work uses its dedicated `feature/shared-stack-ui-adapters` worktree based on app master at `a29ac07`; preserve the existing app checkout.
 - **Q-7:** The app's FFI-only dependency check requires a headless assembly seam. Keep one implementation rather than copying stack assembly into the app; preserve current Arc public paths with re-exports.
 
@@ -122,7 +122,7 @@ Unchanged public items include `register_aggregate::<A>()`, `EsStack<A>` and its
 
 **Q-14 compatibility and release contract.** The extraction is additive and compatible: existing consumers retain the same `arc_web::helpers::es_stack` public items, `arc_web::ProjectorReg`, and `arc_web::helpers::config::{DatabaseDriver,event_integrity_key,event_integrity_key_id}` as re-exports of the same underlying definitions. Keep `ArcAppBuilder`, its private runtime and Actix injection, HTTP APIs, NATS serving, environment names/defaults/error behavior, integrity behavior, snapshot policy, and caller-owned projection replay unchanged. Do not introduce wrapper types, newtypes, or deprecations. Consumers using either default or no-default `arc-web` features retain the complete HTTP API; no schema, migration, credential, or app-copy change is part of the extraction.
 
-This is a compatible 0.8.12 candidate, not a 0.9.0 change. Use the current workspace version during local experimentation; bump all published crates together only for a separately authorized release. The publish order is `arc-core`, `arc-auth-core`, the storage and NATS crates, `arc-stack`, `arc-web`, then the remaining auth packages and CLI in their established order. Add `arc-stack` to workspace membership, package metadata/license files, package verification inventory, and maintained publishing documentation/counts. Publication and credentials remain outside this decision's authorization; do not assume the release workflow's bare `cargo publish` observes this order.
+The shared-stack extraction itself is compatible and additive; it ships in 0.9.0 because Phase 2 includes breaking changes, not because of this extraction. Use the current workspace version during local experimentation; bump all published crates together only for a separately authorized release. The publish order is `arc-core`, `arc-auth-core`, the storage and NATS crates, `arc-stack`, `arc-web`, then the remaining auth packages and CLI in their established order. Add `arc-stack` to workspace membership, package metadata/license files, package verification inventory, and maintained publishing documentation/counts. Publication and credentials remain outside this decision's authorization; do not assume the release workflow's bare `cargo publish` observes this order.
 
 ## Consequences
 
@@ -167,18 +167,18 @@ superseded by U-1; the remaining app migration is FFI-only):
 
 - **Headless boundary:** T1b keeps one assembly implementation and all legacy `arc-web` paths source-compatible while ensuring `arc-stack` has no HTTP, Actix, Tera, auth, or NATS dependency.
 - **App migration:** Preserve the app's `notes.sqlite` filename, `schema.sql` tables, application identity, and `recordings/` layout when the separate FFI-only migration is performed.
-- **Release status:** Recheck 0.8.12 availability before publishing. This ADR does not authorize publication.
+- **Release status:** Recheck 0.9.0 availability before publishing. This ADR does not authorize publication.
 
 ## Follow-ups
 
 - Migrate `arc-android-prototype` to `arc-stack` + `arc-ffi`, preserving its database/schema, recordings, application identity and typed domain behavior; verify FFI-only dependency isolation and emulator data continuity.
-- Obtain authorization before a 0.8.12 release; nothing from this candidate has been published.
+- Obtain authorization before a 0.9.0 release; nothing from this candidate has been published.
 - The app currently does not delete recordings when their note is deleted; that existing gap is outside this stack-sharing change.
 - A NATS-capable supplied stack (C-3), and an explicit integrity-key parameter for `build_with_driver`/`build_stack` instead of the `EVENT_INTEGRITY_KEY` environment variables.
 
 ## Implementation record
 
-SQLite contention behavior change for the 0.8.12 candidate (Q-16, approved by
+SQLite contention behavior change for the 0.9.0 candidate (Q-16, approved by
 U-3): `arc-es-sqlite` sets a 5000 ms busy timeout on every new or replacement
 event-store and read-model connection. Appends use IMMEDIATE transactions to
 take the write lock before reading the current version. Journal mode is
@@ -210,7 +210,9 @@ passed; Swift compile/run was not run because no Swift compiler was configured.
 Android app migration and final pushed-head CI remain pending; nothing was
 published.
 
-The shared-stack changes are additive and are a 0.8.12 candidate. The SQLite
+The shared-stack changes are additive and are a 0.9.0 candidate. The SQLite
 contention change is a documented behavior change in that candidate. No persisted schema or
 legacy Arc web import path changes. The native Android consumer still needs a
 separate migration to `arc-stack` and `arc-ffi`; no release is authorized here.
+
+2026-10-31: the release is 0.9.0 (decision U-9).

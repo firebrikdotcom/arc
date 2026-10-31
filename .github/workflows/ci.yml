@@ -342,9 +342,9 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      # Runs the threat-model browser suite, including the unchanged WebSocket
-      # GAP checks. Those characterize still-open issues; gating on this suite
-      # does not claim they are fixed.
+      # Runs the threat-model browser suite, including the WebSocket
+      # checks formerly labeled GAP. They are now enforced checks, and this
+      # suite gates on them.
       - name: Verify browser session invalidation and threat-model coverage
         run: |
           export CHROMIUM_PATH="$(node --input-type=module -e "import { chromium } from '@playwright/test'; console.log(chromium.executablePath())")"

@@ -6,16 +6,16 @@ aggregate, projectors, schema/migrations, validation, records and exported objec
 `arc-web` and `arc-ffi` are independent sibling adapters. Existing web consumers
 need no changes. This source addition is not a published release or an app migration.
 
-## 0.8.12 SQLite contention behavior (candidate)
+## 0.9.0 SQLite contention behavior (candidate)
 
-The 0.8.12 `arc-es-sqlite` change applies a 5-second busy timeout to every new
+The 0.9.0 `arc-es-sqlite` change applies a 5-second busy timeout to every new
 and replacement connection in both stores. Appends acquire an `IMMEDIATE`
 transaction before reading the current version. Different-stream writers wait
 for the SQLite write lock instead of failing immediately; a lock held longer
 than 5 seconds can still produce a database error. Same-stream optimistic
 version checks still return typed concurrency conflicts. Journal mode is
 unchanged; WAL is not enabled. This observable latency/contention behavior
-change is implemented in the unpublished 0.8.12 candidate; see
+change is implemented in the unpublished 0.9.0 candidate; see
 [Upgrading](upgrading.md).
 
 ## Dependencies and features

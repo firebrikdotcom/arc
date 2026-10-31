@@ -15,7 +15,7 @@ The generated project must use the framework's native FFI path, preserve
 application-owned data, and clearly distinguish emulator testing from an
 explicit device install.
 
-Until a separately authorized 0.8.12 release is published, the Android
+Until a separately authorized 0.9.0 release is published, the Android
 framework crates are not available from crates.io. The generator therefore
 needs an explicit local checkout and must record the dependency paths that it
 uses. Empty scaffolds also need to remain usable without opening a database
@@ -47,7 +47,7 @@ Before writing, the CLI verifies that it identifies a matching checkout with
 `arc-core`, `arc-stack` and `arc-ffi` manifests at one workspace version. The
 generated Rust manifest records absolute path dependencies and the actual
 checkout version. It does not guess a sibling directory, use a fictional
-0.8.12 registry version, add a git dependency, publish crates, or rewrite
+0.9.0 registry version, add a git dependency, publish crates, or rewrite
 existing paths if `ARC_PATH` later changes.
 
 The generated Rust package and library name is `S_core`, where `S` is the
@@ -165,7 +165,7 @@ included in this task.
 
 ## Follow-ups
 
-- Revisit registry dependencies only after a separately authorized 0.8.12
+- Revisit registry dependencies only after a separately authorized 0.9.0
   release.
 - Keep app migration and any installation of the reference app outside this
   scaffold milestone.
@@ -187,3 +187,5 @@ an in-place reinstall persistence check), the host integration test
 `.github/workflows/android-scaffold.yml`. Emulator acceptance refuses physical
 serials. The generated CLI help was checked against the built CLI; its command
 reference is in [Your first Android app](../android.md).
+
+2026-10-31: the release is 0.9.0 (decision U-9).

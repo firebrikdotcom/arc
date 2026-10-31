@@ -40,7 +40,7 @@ Operational guide for agents working in this repository. Keep changes aligned wi
 - Auth modes:
   - Session/cookie auth for HTML/admin routes.
   - JWT bearer auth for `/api/*`.
-- Realtime: WebSocket support under `crates/arc-app/src/websocket/`.
+- Realtime: WebSocket support lives in `arc-web`; the reference app no longer mounts `/ws`.
 - Distributed event lane: `arc-es-nats` publishes persisted events to NATS JetStream; **Benthos (Redpanda Connect)** is the single routing and event-handler delivery layer that consumes `events.>`. See `docs/architecture-decisions/0001-benthos-only-event-routing.md` and `docs/event-handlers.md`. (The earlier `arc-worker` consumer crate has been removed; treat any reference to it as historical.)
 
 Important: older planning docs can lag behind code. If docs conflict, prefer current source and the source-of-truth order below.

@@ -10,7 +10,7 @@ cargo install --git https://github.com/firebrikdotcom/arc --tag v0.8.11 arc-web-
 ```
 
 All twelve matching 0.8.11 packages are published to crates.io. The newly added
-`arc-stack` and `arc-ffi` packages are source-only 0.8.12 candidates and are not
+`arc-stack` and `arc-ffi` packages are source-only 0.9.0 candidates and are not
 published; no release has been authorized. Generated
 applications resolve the same framework and authentication-plugin versions.
 Version 0.8.10 adds

@@ -153,7 +153,7 @@ Benthos is the only durable distributed event router. It consumes `events.>` and
 
 `arc-stack` owns shared stack assembly. `arc-web` is the web adapter and
 `arc-ffi` is the native adapter without web dependencies. This shared-stack
-work is a 0.8.12 candidate and has not been published. See
+work is a 0.9.0 candidate and has not been published. See
 [ADR 0003](docs/architecture-decisions/0003-shared-stack-ui-adapters.md).
 
 ## Documentation

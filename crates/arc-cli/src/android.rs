@@ -92,7 +92,7 @@ fn checkout(
     explicit: Option<&Path>,
     environment: Option<PathBuf>,
 ) -> Result<(PathBuf, String), String> {
-    let root = explicit.map(Path::to_path_buf).or(environment).ok_or("Android scaffolding requires a local Arc checkout: pass --arc-path PATH or set ARC_PATH (0.8.12 is not published)")?;
+    let root = explicit.map(Path::to_path_buf).or(environment).ok_or("Android scaffolding requires a local Arc checkout: pass --arc-path PATH or set ARC_PATH (0.9.0 is not published)")?;
     let root = root.canonicalize().map_err(|_| CHECKOUT_ERROR)?;
     let read = |path: &Path| -> Result<toml::Value, String> {
         toml::from_str(&fs::read_to_string(path).map_err(|_| CHECKOUT_ERROR.to_string())?)

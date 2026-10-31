@@ -17,7 +17,7 @@ This documentation covers the application you receive from `arc new`: what is in
 Arc separates headless stack construction (`arc-stack`) from its UI adapters:
 `arc-web` serves web deployments and `arc-ffi` supports native UIs. The Android
 app is FFI-only; web UIs are for web deployments. These adapter crates are
-0.8.12 candidates and are not yet published.
+0.9.0 candidates and are not yet published.
 
 ## What Arc gives your application
 
