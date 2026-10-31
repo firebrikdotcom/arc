@@ -237,10 +237,8 @@ mod postgres_tests {
 
     #[tokio::test]
     async fn postgres_initializes_storage_schema_when_test_database_is_available() {
+        // Postgres integration is exercised only when ARC_POSTGRES_TEST_DATABASE_URL is set (CI sets it).
         let Ok(url) = std::env::var("ARC_POSTGRES_TEST_DATABASE_URL") else {
-            eprintln!(
-                "Postgres integration not exercised: ARC_POSTGRES_TEST_DATABASE_URL is unset"
-            );
             return;
         };
         let stores = build_stores(DatabaseDriver::Postgres, &url).await.unwrap();

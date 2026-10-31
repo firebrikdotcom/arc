@@ -41,6 +41,9 @@ fn run(cli: &Path, dir: &Path, args: &[&str]) {
 }
 
 #[test]
+// Builds and tests a whole generated project; the "Android Generated Host Tests" CI job runs it,
+// and under coverage instrumentation it exceeds tarpaulin's per-test timeout.
+#[cfg_attr(tarpaulin, ignore)]
 fn generated_two_resource_project_passes_host_tests() {
     let base = std::env::temp_dir().join(format!(
         "arc-android-host-{}-{}",

@@ -207,6 +207,6 @@ fixture, and removes its labeled containers on exit. Override
 needed. The runner builds its verifier from the checked-in Dockerfile (Rust 1.90
 and native SQLite/OpenSSL dependencies) and uses Cargo `--locked`; no private
 prebuilt image is required. The default cache is the checkout’s `target/verification-cache` on disk.
-Port 18784 must be free. Test receipts are written to
-`/tmp/arc-test-durable-audit-receipt.json` (override
-`ARC_AUDIT_RECEIPT` for another lane).
+Port 18784 must be free. Test receipts are written to a private temporary
+directory created per run with `mktemp -d` and removed afterwards (set
+`ARC_AUDIT_RECEIPT` to keep a receipt at a path you choose).

@@ -3,11 +3,15 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 project="${ARC_AUDIT_TEST_PROJECT:-arc-test-durable-browser}"
 compose=(docker compose -p "$project" -f tests/durable-audit/compose.yml)
-cleanup() { "${compose[@]}" down --remove-orphans; }
+receipt_dir=""
+cleanup() { "${compose[@]}" down --remove-orphans; [ -n "$receipt_dir" ] && rm -rf "$receipt_dir"; }
 trap cleanup EXIT
 trap "exit 130" INT
 trap "exit 143" TERM
-export ARC_AUDIT_RECEIPT="${ARC_AUDIT_RECEIPT:-/tmp/arc-test-durable-audit-receipt.json}"
+if [ -z "${ARC_AUDIT_RECEIPT:-}" ]; then
+  receipt_dir="$(mktemp -d)"
+  export ARC_AUDIT_RECEIPT="$receipt_dir/receipt.json"
+fi
 "${compose[@]}" build verify
 "${compose[@]}" run --rm verify cargo build --locked -p arc-web --example durable-audit-fixture
 start() {
