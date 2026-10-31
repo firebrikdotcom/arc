@@ -90,7 +90,7 @@ fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
         }
         Some("generate") => {
             let kind = args.next().ok_or_else(|| {
-                "usage: arc generate resource <name> (alias: aggregate)".to_string()
+                "usage: arc generate resource <name> [--ffi] [--api] [--ui] [--api-auth jwt|none] [--ui-auth session|none] [--roles LIST] (alias: aggregate; --ffi is incompatible with --api, --ui, --api-auth, --ui-auth, and --roles)".to_string()
             })?;
             if kind != "resource" && kind != "aggregate" {
                 return Err(format!(
@@ -98,7 +98,7 @@ fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
                 ));
             }
             let name = args.next().ok_or_else(|| {
-                "usage: arc generate resource <name> [--api] [--ui] (alias: aggregate)".to_string()
+                "usage: arc generate resource <name> [--ffi] [--api] [--ui] [--api-auth jwt|none] [--ui-auth session|none] [--roles LIST] (alias: aggregate; --ffi is incompatible with --api, --ui, --api-auth, --ui-auth, and --roles)".to_string()
             })?;
             if name.starts_with('-') {
                 return Err("resource name is required; run `arc generate resource --help`".into());
@@ -256,7 +256,7 @@ fn print_requested_help(args: &[String]) -> Result<bool, String> {
         Some("new") => print_new_help(),
         Some("doctor") => println!("Diagnose Android prerequisites without installing anything\n\nUsage:\n  arc doctor --android\n\nOptions:\n  --android  Check Rust, SDK, NDK, Java and emulator tooling\n  -h, --help Show help"),
         Some("generate") => match subcommand {
-            None => println!("Generate application resources\n\nUsage:\n  arc generate <command>\n\nCommands:\n  resource    Generate an event-sourced CRUD resource\n  aggregate   Alias for resource\n\nOptions:\n  -h, --help  Show help"),
+            None => println!("Generate application resources\n\nUsage:\n  arc generate <command>\n\nCommands:\n  resource    Generate an event-sourced CRUD resource\n  aggregate   Alias for resource\n\nOptions:\n  --ffi  Generate native resource adapters in an Arc Android project; incompatible with --api, --ui, --api-auth, --ui-auth, and --roles\n  -h, --help  Show help"),
             Some(kind @ ("resource" | "aggregate")) => print_generate_help(kind),
             Some(kind) => return Err(format!("unknown generator `{kind}`; expected `resource` or `aggregate`")),
         },
@@ -282,6 +282,7 @@ Usage:
   arc new <name> [--ui] [--api] [--android] [--arc-path PATH] [--no-git]
   arc plugin add <name>
   arc plugin migrate-auth-ui
+  arc doctor --android
   arc generate resource <name> [--api] [--ui] [--api-auth jwt] [--ui-auth session] [--roles admin,user]
   arc generate aggregate <name> [--api] [--ui]
 
@@ -300,10 +301,11 @@ fn print_generate_help(kind: &str) {
         "Generate and register an event-sourced aggregate resource
 
 Usage:
-  arc generate {kind} <name> [--api] [--ui] [--api-auth jwt|none] [--ui-auth session|none] [--roles LIST]
+  arc generate {kind} <name> [--ffi] [--api] [--ui] [--api-auth jwt|none] [--ui-auth session|none] [--roles LIST]
 
 Options:
   --ffi  Generate native resource adapters in an Arc Android project
+          Incompatible with --api, --ui, --api-auth, --ui-auth, and --roles
   --api  Add public JSON CRUD endpoints
   --ui   Add browser CRUD pages (session-protected when auth-session is installed)
   --api-auth jwt      Explicitly protect this API resource
