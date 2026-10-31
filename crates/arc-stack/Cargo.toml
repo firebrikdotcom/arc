@@ -6,6 +6,7 @@ authors.workspace = true
 description = "Headless event-sourced stack assembly for Arc"
 license.workspace = true
 repository.workspace = true
+keywords = ["event-sourcing", "cqrs", "sqlite", "postgres", "arc"]
 
 [features]
 default = ["sqlite"]

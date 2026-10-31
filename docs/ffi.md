@@ -8,11 +8,15 @@ need no changes. This source addition is not a published release or an app migra
 
 ## 0.8.12 SQLite contention behavior (candidate)
 
-The proposed 0.8.12 `arc-es-sqlite` change applies a 5-second busy timeout to
-new and replacement connections and acquires write transactions with
-`IMMEDIATE` semantics. It does not enable WAL or change journal mode. This is
-an observable latency/contention behavior change and is not released or
-published; see [Upgrading](upgrading.md).
+The 0.8.12 `arc-es-sqlite` change applies a 5-second busy timeout to every new
+and replacement connection in both stores. Appends acquire an `IMMEDIATE`
+transaction before reading the current version. Different-stream writers wait
+for the SQLite write lock instead of failing immediately; a lock held longer
+than 5 seconds can still produce a database error. Same-stream optimistic
+version checks still return typed concurrency conflicts. Journal mode is
+unchanged; WAL is not enabled. This observable latency/contention behavior
+change is implemented in the unpublished 0.8.12 candidate; see
+[Upgrading](upgrading.md).
 
 ## Dependencies and features
 

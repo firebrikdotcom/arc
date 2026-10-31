@@ -33,10 +33,13 @@ take precedence when a claim here becomes stale.
   U-1 sets Android to FFI-only and reserves web UIs for web deployments; U-2
   creates `arc-ffi`. Q-8..Q-13 mobile web/both requirements are historical and
   superseded. The Android app migration to `arc-stack` + `arc-ffi` remains open.
-- Candidate behavior change for 0.8.12: SQLite uses a 5-second busy timeout
-  and IMMEDIATE write transactions; journal mode is unchanged. Both SQLite
-  contention behavior and the crate additions are unpublished. A 0.8.12 release
-  needs authorization; nothing has been published.
+- Implemented 0.8.12 candidate behavior change: SQLite uses a 5-second busy
+  timeout on new/replacement event-store and read-model connections and
+  IMMEDIATE append transactions; journal mode is unchanged. Local measurement:
+  160 simultaneous appends from eight workers plus projections succeeded in
+  0.12–0.15 seconds; same-stream contenders produced one commit and a typed
+  `ConcurrencyConflict`. The SQLite behavior change and crate additions remain
+  unpublished. A 0.8.12 release needs authorization; nothing has been published.
 - Reported passing framework checks (CARGO_BUILD_JOBS=4): `make check`,
   `make test`, `make lint`, `make doctor`, `bash scripts/check-publish-packages.sh`,
   isolated compatibility/feature checks, dependency isolation and regression

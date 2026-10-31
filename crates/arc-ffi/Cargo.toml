@@ -6,6 +6,7 @@ authors.workspace = true
 description = "Async native adapter runtime and shared core registry for Arc"
 license.workspace = true
 repository.workspace = true
+keywords = ["event-sourcing", "cqrs", "uniffi", "ffi", "sqlite"]
 
 [features]
 default = ["uniffi", "sqlite"]

@@ -83,10 +83,14 @@ source-compatible re-exports of `arc-stack` items. The extraction is additive;
 the 0.8.12 candidate has not been published. `arc-ffi` is a native adapter and
 does not imply an Android web UI.
 
-The proposed 0.8.12 SQLite behavior also waits up to 5 seconds for lock
-contention and acquires append write transactions immediately. Journal mode
-remains unchanged (WAL is not enabled). This changes contention latency and
-lock acquisition behavior; it is not part of a published release yet.
+The 0.8.12 SQLite behavior change sets a 5-second busy timeout on every new or
+replacement event-store and read-model connection. Appends acquire an IMMEDIATE
+write transaction before reading the current version, so competing writers
+queue instead of failing immediately. A write waits while another connection
+holds the lock; it can still fail if the lock remains held longer than 5
+seconds, such as during a long transaction or by another process. Journal mode
+is unchanged (WAL is not enabled). This changes contention latency and lock
+acquisition behavior; it is implemented in the unpublished 0.8.12 candidate.
 
 - **SemVer:** `0.x` releases move in lockstep. A patch bump is compatible; a
   minor bump may break the public API surface defined in ADR 0002.

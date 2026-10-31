@@ -173,6 +173,19 @@ superseded by U-1; the remaining app migration is FFI-only):
 
 ## Implementation record
 
+SQLite contention behavior change for the 0.8.12 candidate (Q-16, approved by
+U-3): `arc-es-sqlite` sets a 5000 ms busy timeout on every new or replacement
+event-store and read-model connection. Appends use IMMEDIATE transactions to
+take the write lock before reading the current version. Journal mode is
+unchanged; WAL is not enabled. This changes lock-wait latency: writers queue
+while a lock is available within the timeout, and a lock held longer than five
+seconds can still fail. A local measurement launched 160 simultaneous appends
+from eight barrier-started workers; all appends and projection writes succeeded
+in 0.12–0.15 seconds. Same-stream contenders produced exactly one commit and a
+typed `ConcurrencyConflict`. Before the fix, four threads making 30 distinct-ID
+writes each produced 27 successes and 93 `database is locked` errors. These are
+local measurements, not a general throughput guarantee.
+
 Implemented in `84983b0` (arc-ffi), `a271610` (arc-stack), `beb93b5` (QA), and
 `50cf543` (caller-built stack for arc-web), following ADR commit `e5516eb`.
 `arc-stack` publicly provides `ProjectorReg`, `DatabaseDriver`, `EsStack`,
@@ -192,6 +205,7 @@ passed; Swift compile/run was not run because no Swift compiler was configured.
 Android app migration and final pushed-head CI remain pending; nothing was
 published.
 
-The changes are additive and are a 0.8.12 candidate. No persisted schema or
+The shared-stack changes are additive and are a 0.8.12 candidate. The SQLite
+contention change is a documented behavior change in that candidate. No persisted schema or
 legacy Arc web import path changes. The native Android consumer still needs a
 separate migration to `arc-stack` and `arc-ffi`; no release is authorized here.
