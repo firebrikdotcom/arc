@@ -23,6 +23,11 @@ Details and migration steps: [Upgrading](docs/upgrading.md#phase-2-security-hard
 
 - `arc new` no longer lets inherited `GIT_DIR` and related variables (for example under a Git hook) redirect `git init` to the caller's repository.
 
+### Security
+
+- Update `actix-http` to 3.20.0 (zstd 0.14.3, zstd-safe 8.2.0) to fix RUSTSEC-2026-0391 and RUSTSEC-2026-0403 in the locked workspace and `cargo install --locked` CLI; downstream apps resolve their own lock.
+- Repair the Cargo.lock and package-lock.json dependency audit findings.
+
 ### Added and changed
 
 - Phase 2 security hardening: WebSocket origin and identity authorization, and

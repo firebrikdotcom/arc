@@ -87,6 +87,11 @@ cargo publish -p arc-es-nats --dry-run
 cargo publish -p arc-stack --dry-run
 cargo publish -p arc-ffi --dry-run
 cargo publish -p arc-web --dry-run
+cargo publish -p arc-auth-db --dry-run
+cargo publish -p arc-auth-session --dry-run
+cargo publish -p arc-auth-jwt --dry-run
+cargo publish -p arc-auth-admin --dry-run
+cargo publish -p arc-auth-rbac --dry-run
 cargo publish -p arc-web-cli --dry-run
 ```
 

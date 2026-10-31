@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 description = "Arc framework runtime: Actix/Tera web machinery, event-sourcing wiring, and the application builder seam."
+readme = "../../README.md"
+keywords = ["arc", "actix", "event-sourcing", "cqrs", "web"]
 license.workspace = true
 repository.workspace = true
 

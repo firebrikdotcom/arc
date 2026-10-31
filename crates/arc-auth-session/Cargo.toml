@@ -6,6 +6,8 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Optional browser session authentication plugin for Arc"
+readme = "../../README.md"
+keywords = ["arc", "session", "authentication", "browser", "actix"]
 
 [dependencies]
 arc-auth-core = { path = "../arc-auth-core", version = "0.9.0" }

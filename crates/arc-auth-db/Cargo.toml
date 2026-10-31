@@ -6,6 +6,8 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Database identity and role provider plugin for Arc"
+readme = "../../README.md"
+keywords = ["arc", "authentication", "database", "roles", "identity"]
 
 [dependencies]
 arc-auth-core = { path = "../arc-auth-core", version = "0.9.0" }

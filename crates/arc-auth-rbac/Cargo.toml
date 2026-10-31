@@ -6,6 +6,8 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Simple role-based authorization policy for Arc"
+readme = "../../README.md"
+keywords = ["arc", "rbac", "authorization", "roles", "policy"]
 
 [dependencies]
 arc-auth-core = { path = "../arc-auth-core", version = "0.9.0" }
