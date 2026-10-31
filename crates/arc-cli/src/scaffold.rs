@@ -221,8 +221,11 @@ pub(crate) fn validate_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Variables that make Git pick a repository other than the working directory.
-const GIT_REPOSITORY_ENV: [&str; 8] = [
+/// Variables that make Git pick a repository other than the working directory, or inject
+/// per-invocation config from a parent `git -c` / hook. User and system config
+/// (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`) and `GIT_CEILING_DIRECTORIES` are kept on purpose:
+/// they cannot redirect `git init` to another repository.
+const GIT_REPOSITORY_ENV: [&str; 10] = [
     "GIT_DIR",
     "GIT_WORK_TREE",
     "GIT_INDEX_FILE",
@@ -231,6 +234,8 @@ const GIT_REPOSITORY_ENV: [&str; 8] = [
     "GIT_ALTERNATE_OBJECT_DIRECTORIES",
     "GIT_NAMESPACE",
     "GIT_PREFIX",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
 ];
 
 /// Builds a `git` command that cannot be redirected to a caller's repository.
@@ -242,6 +247,14 @@ fn isolated_git_command(root: &Path, inherited: &[(&str, &Path)]) -> Command {
     }
     for name in GIT_REPOSITORY_ENV {
         command.env_remove(name);
+    }
+    // `GIT_CONFIG_COUNT` pairs with numbered GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n entries.
+    for (name, _) in std::env::vars_os() {
+        if let Some(name) = name.to_str() {
+            if name.starts_with("GIT_CONFIG_KEY_") || name.starts_with("GIT_CONFIG_VALUE_") {
+                command.env_remove(name);
+            }
+        }
     }
     command.current_dir(root);
     command
@@ -277,8 +290,17 @@ mod tests {
 
     #[test]
     fn git_init_ignores_inherited_repository_environment() {
+        struct Cleanup(Vec<PathBuf>);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                for path in &self.0 {
+                    let _ = fs::remove_dir_all(path);
+                }
+            }
+        }
         let outer = temp_root();
         let project = temp_root().with_extension("project");
+        let _cleanup = Cleanup(vec![outer.clone(), project.clone()]);
         fs::create_dir_all(&outer).unwrap();
         fs::create_dir_all(&project).unwrap();
         assert!(isolated_git_command(&outer, &[])
@@ -294,8 +316,6 @@ mod tests {
             .output()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&bare.stdout).trim(), "false");
-        fs::remove_dir_all(outer).unwrap();
-        fs::remove_dir_all(project).unwrap();
     }
 
     #[test]
