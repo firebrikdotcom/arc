@@ -6,6 +6,14 @@ aggregate, projectors, schema/migrations, validation, records and exported objec
 `arc-web` and `arc-ffi` are independent sibling adapters. Existing web consumers
 need no changes. This source addition is not a published release or an app migration.
 
+## 0.8.12 SQLite contention behavior (candidate)
+
+The proposed 0.8.12 `arc-es-sqlite` change applies a 5-second busy timeout to
+new and replacement connections and acquires write transactions with
+`IMMEDIATE` semantics. It does not enable WAL or change journal mode. This is
+an observable latency/contention behavior change and is not released or
+published; see [Upgrading](upgrading.md).
+
 ## Dependencies and features
 
 ```toml

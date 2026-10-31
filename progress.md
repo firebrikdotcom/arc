@@ -23,6 +23,30 @@ observability, and developer experience.
 This is the canonical project-status and roadmap tracker. Current source code and accepted ADRs
 take precedence when a claim here becomes stale.
 
+## Shared stack and UI adapters (ADR 0003) — 2026-10-30
+
+- Implemented in `84983b0` (`arc-ffi`), `a271610` (`arc-stack`), `beb93b5`
+  (shared-stack QA), and `50cf543` (web builder accepts a caller-owned stack);
+  ADR 0003 is `e5516eb`.
+- `arc-stack` owns headless stack assembly. `arc-web` and `arc-ffi` are sibling
+  adapters, and old `arc-web` stack/config public paths remain re-exports.
+  U-1 sets Android to FFI-only and reserves web UIs for web deployments; U-2
+  creates `arc-ffi`. Q-8..Q-13 mobile web/both requirements are historical and
+  superseded. The Android app migration to `arc-stack` + `arc-ffi` remains open.
+- Candidate behavior change for 0.8.12: SQLite uses a 5-second busy timeout
+  and IMMEDIATE write transactions; journal mode is unchanged. Both SQLite
+  contention behavior and the crate additions are unpublished. A 0.8.12 release
+  needs authorization; nothing has been published.
+- Reported passing framework checks (CARGO_BUILD_JOBS=4): `make check`,
+  `make test`, `make lint`, `make doctor`, `bash scripts/check-publish-packages.sh`,
+  isolated compatibility/feature checks, dependency isolation and regression
+  fixtures. Native Kotlin/JVM create/read smoke passed. Live Postgres was not
+  run (`ARC_POSTGRES_TEST_DATABASE_URL` unset); Swift compile/run was not run
+  (compiler unavailable); Android migration and final pushed-head CI are pending.
+- Follow-ups: migrate `arc-android-prototype` to the shared stack and native
+  adapter while preserving app identity/data; obtain release authorization;
+  complete final CI on the pushed candidate. See coordination handoff section 7.
+
 ## Single Workbench design — 2026-10-19
 
 - The repository app (`crates/arc-app`) now renders the same Workbench design as

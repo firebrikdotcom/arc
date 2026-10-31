@@ -13,8 +13,8 @@ The relevant facts in this worktree are:
 
 | Fact | Evidence |
 |---|---|
-| `EsStack<A>` exposes a command bus and shared handles to its read-model store and projection engine. | `crates/arc-web/src/helpers/es_stack.rs:22-28` |
-| The current `build` function chooses its database driver from the environment and returns an `EsStack<A>`. | `crates/arc-web/src/helpers/es_stack.rs:104-112` |
+| `EsStack<A>` exposes a command bus and shared handles to its read-model store and projection engine. | `crates/arc-stack/src/es_stack.rs:24-32` |
+| The current `build` function chooses its database driver from the environment and returns an `EsStack<A>`. | `crates/arc-stack/src/es_stack.rs:147-172` |
 | An `ArcAppBuilder` registration captures a call to the private runtime builder. | `crates/arc-web/src/lib.rs:117-129` |
 | The existing registration creates a new aggregate registration and its bus at serve time. | `crates/arc-web/src/lib.rs:194-206`; `crates/arc-web/src/commands/serve.rs:67-75,115-123` |
 | The current runtime wraps its owned command bus with `web::Data::new` and shares the store and projection engine through `web::Data::from`. | `crates/arc-web/src/commands/serve.rs:42-57` |
@@ -25,9 +25,12 @@ The relevant facts in this worktree are:
 
 ## Decision
 
-The application owns one stack for each aggregate. UI adapters use that stack and contain only interface-specific translation. Web and FFI may be enabled together; neither adapter creates a second command bus or projection engine.
+The application owns one stack for each aggregate. UI adapters use that stack and contain only interface-specific translation. A deployment may select the adapter it needs; adapters sharing a process use the same command bus and projection engine.
 
-The handoff decisions are settled as follows:
+The original app-specific handoff decisions below are retained as dated
+history. U-1 (2026-10-30) supersedes their mobile web/both requirements: the
+Android app is FFI-only, while web UIs are for web deployments. Q-14 and Q-15
+continue to govern the shared framework crates and sibling adapters.
 
 - **D-A — One stack:** Build one stack per aggregate per process and let the application own it.
 - **D-B — App service boundary:** Note operations, typed errors, and other domain-facing application operations live in `NotesCore`. Adapters translate requests and responses; they do not dispatch directly to the bus.
@@ -44,14 +47,26 @@ The oracle decisions for this framework change are also settled:
 - **Q-6:** App-side work uses its dedicated `feature/shared-stack-ui-adapters` worktree based on app master at `a29ac07`; preserve the existing app checkout.
 - **Q-7:** The app's FFI-only dependency check requires a headless assembly seam. Keep one implementation rather than copying stack assembly into the app; preserve current Arc public paths with re-exports.
 
-The app-side decisions for T2–T6 are:
+### Historical app-side decisions for T2–T6 (web/both portions superseded by U-1)
 
-- **Q-8 — Compose plan:** The newer handoff governs: retain UniFFI, Kotlin recording listing, platform `MediaPlayer`, Material 3 with the Arc palette, and the web adapter and its existing navigation and recording behavior. Keep plan steps 1 and 3–7, adapt step 4 to Q-9, replace the copied stack builder with shared assembly, and use feature/source-set/manifest isolation plus documentation and size measurements for the remaining work.
-- **Q-9 — Variants:** Provide `web`, `compose`, and `both` flavors mapped to Cargo `web`, `ffi`, and `web,ffi`; default Makefile builds/deploys to `both`. Both adapters run concurrently over one `NotesCore`; a remembered Web/Compose selector changes the visible UI without restarting them. Only web/both include internet, loopback, and WebView resources.
-- **Q-10 — Features:** Default Cargo features are `web` and `ffi`; make adapter dependencies optional and gate server/JNI and UniFFI code. Keep core, Tokio, and core storage dependencies unconditional. Bindgen is host tooling; Compose dependencies and generated bindings belong to compose/both. Explicitly check core-only, web, ffi, and combined builds.
-- **Q-11 — Runtime:** `NotesCore` owns one long-lived multithread Tokio runtime, its handle, and one stack. Initialize schema, stack, and caller-owned projection rebuild once. Both adapters reuse the same `Arc<NotesCore>` by canonical database path. Async methods spawn on that runtime and await results; map join failures to `CoreError`. Do not block inside async/UI callbacks or retry writes after a cancelled wait.
-- **Q-12 — Continuity:** All flavors retain the same application ID, signing identity, compatible version codes, database/schema, recording paths, markers, preferences, and stored session keys. Replace variants in place with `adb install -r`; never uninstall or clear data.
-- **Q-13 — Emulator gate:** T5 includes a bounded E2E runner pinned to `emulator-5580`, with explicit serials, per-flavor reports, adapter cross-read/write, recording and recovery coverage, and Q-12's install sequence. Refuse other devices and never run phone tests or unscoped `connectedAndroidTest`; missing tooling or unavailable capture is reported as unverified.
+The following D-A through D-D choices described the earlier dual-adapter app
+plan and are historical where they conflict with U-1:
+
+- **Q-8 — Compose plan (historical):** The earlier plan retained UniFFI, Kotlin recording listing, platform `MediaPlayer`, Material 3, and a mobile web adapter.
+- **Q-9 — Variants (superseded):** The proposed Android `web`, `compose`, and `both` flavors and simultaneous mobile adapters are not active requirements.
+- **Q-10 — Features (superseded for the app):** The proposed app-level web/ffi feature matrix is not active; Android is FFI-only. Framework-level adapter separation remains.
+- **Q-11 — Runtime (historical):** The earlier two-adapter `NotesCore` acceptance is superseded; Q-15 specifies reusable arc-ffi infrastructure, with app migration separate.
+- **Q-12 — Continuity (still applicable):** A future app migration must preserve application identity and stored data; this does not authorize installation or data changes.
+- **Q-13 — Emulator gate (superseded):** Multi-flavor Android E2E is not an active requirement for this framework work.
+
+**U-1 — Mobile adapter choice (2026-10-30).** The Android app is FFI-only;
+web UIs are for web deployments. This supersedes Q-8 through Q-13 wherever
+they require a mobile web adapter, WebView, loopback server, or web/both flavor.
+Those portions remain dated history, not active requirements.
+
+**U-2 — Native adapter crate (2026-10-30).** Create `arc-ffi` as the UniFFI/native
+counterpart to `arc-web`, over `arc-stack`, without web dependencies. Q-15 below
+specifies its API and runtime contract.
 
 ### Specification of the change
 
@@ -126,42 +141,57 @@ This is a compatible 0.8.12 candidate, not a 0.9.0 change. Use the current works
 
 ## Rollout plan
 
-Tasks run in order, with one commit per task. T1 and T1b belong to the Arc framework repository; T2–T6 belong to the consumer app repository. The app-side decisions map to rollout work as follows:
+Historical rollout mapping (T2–T6 portions requiring mobile web/both are
+superseded by U-1; the remaining app migration is FFI-only):
 
 | Decision | Rollout application |
 |---|---|
-| Q-8 | T5/T6 follow the newer handoff, retain web behavior and the chosen Compose stack, replace copied assembly with `arc-stack`, and keep the relevant Compose plan steps. |
-| Q-9 | T5 builds web, compose, and both flavors; both runs the two adapters over one `NotesCore` and remembers the visible UI choice. |
-| Q-10 | T4 tests core-only, web, ffi, and web+ffi with explicit feature selection and flavor-specific generated bindings/resources. |
-| Q-11 | T3 implements the single runtime bridge and shared `NotesCore`; T5 proves it through Android UniFFI and concurrent adapter flows. |
-| Q-12 | T5 verifies sequential in-place flavor installation and storage/audio continuity without uninstalling or clearing data. |
-| Q-13 | T5 runs the bounded E2E suite only on emulator-5580, with per-flavor reports and no phone tests. |
+| Q-8 | Historical Compose/mobile-web plan; superseded by U-1 where it requires mobile web UI. |
+| Q-9 | Historical: T5 proposed web, compose, and both flavors; superseded by U-1. |
+| Q-10 | Historical app feature/flavor matrix; superseded by FFI-only U-1. |
+| Q-11 | Historical app runtime plan; the app migration remains separate and FFI-only. |
+| Q-12 | Data continuity remains a requirement for any future app migration; no installation is authorized here. |
+| Q-13 | Historical multi-flavor E2E plan; superseded by FFI-only app migration scope. |
 
 | Task | Repository and change | Owned checks / completion evidence |
 |---|---|---|
 | T1 | Framework: add `SharedStack`, `register_aggregate_with_stack`, explicit-driver stack construction, bidirectional integration coverage, and API documentation. | `make check && make test && make lint && make doctor`; shared-bus writes are visible to HTTP reads and HTTP writes are visible through the retained stack. Existing registration tests stay green. |
 | T1b | Framework: extract the completed assembly API into headless `arc-stack`, preserving `arc-web` re-export paths and feature behavior. | Downstream fixtures compile old imports and signatures under default, no-default, PostgreSQL, and all features; package dependency checks show no HTTP/Actix/Tera dependency through `arc-stack`. Run the prescribed framework checks and `make publish-check`. |
-| T2 | App: use matching local `arc-stack`, `arc-web`, and `arc-core` dependencies without duplicate core types. | `cargo tree -p arc-web` resolves the T1 framework source and one matching core type; `NotesCore` can use `arc-stack` while web remains feature-gated. |
-| T3 | App: extract note operations into `NotesCore`, which owns one Tokio runtime, handle, and stack per canonical database path. | `cd rust && CARGO_BUILD_JOBS=4 cargo test`; concurrent adapter operations share one `Arc<NotesCore>`, bridge through its runtime, and focused tests cover note operations and typed errors. |
-| T4 | App: implement Cargo features and web adapter over `NotesCore`; keep runtime assembly in `arc-stack`, not an app copy. | Explicit no-default core-only, web, ffi, and web+ffi checks pass. FFI-only dependency analysis excludes Actix and Tera; web/both retain the existing adapter behavior. |
-| T5 | App: provide `web` → `web`, `compose` → `ffi`, and `both` → `web,ffi` Gradle flavors; default `FLAVOR` to `both`. Add UniFFI bindings, Compose UI, recording state, playback, and a remembered selector with simultaneous adapters in `both`. | Run `make e2e-emulator` pinned to emulator-5580, sequential data-preserving flavor installs, adapter cross-visibility, recording/recovery tests, and per-flavor isolation checks. Only after these checks, deploy the requested flavor to Phone (3) in place; never uninstall or clear data. |
-| T6 | App: align README, architecture guide, and Compose plan; explain adding a UI and record measured sizes for all variants. | Documentation matches code and measured web, compose, and both APK/native library sizes. Applicable CI passes on the final head. |
+| T2–T6 | App migration and Android UI work (historical rollout; mobile web/both portions superseded by U-1). | App migration to `arc-stack` + `arc-ffi` remains a separate FFI-only task; see Follow-ups. No app files are part of this implementation record. |
 
 ## Risks and open questions
 
-- **Two writers:** If T1 is delayed, two stacks on one SQLite file are only a temporary stopgap; they do not provide live cross-stack visibility and are not the target design.
-- **Tokio runtime:** `NotesCore` owns a Tokio runtime. T4 must establish whether Actix and UniFFI can share it or need a bridge.
-- **Headless boundary:** T1b must keep one assembly implementation and all legacy `arc-web` paths source-compatible while ensuring `arc-stack` has no HTTP, Actix, Tera, auth, or NATS dependency.
-- **Async runtime:** UniFFI and Actix use their own surrounding runtimes; the shared core runtime bridge must be proven on Android and under concurrent adapter use. Cancellation cannot imply a safe write retry.
-- **Data continuity:** Preserve the app's `notes.sqlite` filename, `schema.sql` tables, and `recordings/` layout.
+- **Headless boundary:** T1b keeps one assembly implementation and all legacy `arc-web` paths source-compatible while ensuring `arc-stack` has no HTTP, Actix, Tera, auth, or NATS dependency.
+- **App migration:** Preserve the app's `notes.sqlite` filename, `schema.sql` tables, application identity, and `recordings/` layout when the separate FFI-only migration is performed.
 - **Release status:** Recheck 0.8.12 availability before publishing. This ADR does not authorize publication.
 
 ## Follow-ups
 
-- Add `arc-stack` as the sole headless stack assembly crate and keep the `arc-web` compatibility facades covered by downstream compile fixtures and dependency guards.
+- Migrate `arc-android-prototype` to `arc-stack` + `arc-ffi`, preserving its database/schema, recordings, application identity and typed domain behavior; verify FFI-only dependency isolation and emulator data continuity.
+- Obtain authorization before a 0.8.12 release; nothing from this candidate has been published.
 - The app currently does not delete recordings when their note is deleted; that existing gap is outside this stack-sharing change.
-- Remove the first prototype's unused `respond` and home-page code in the app when T4 reaches the relevant files.
 
 ## Implementation record
 
-To be completed when T1 merges.
+Implemented in `84983b0` (arc-ffi), `a271610` (arc-stack), `beb93b5` (QA), and
+`50cf543` (caller-built stack for arc-web), following ADR commit `e5516eb`.
+`arc-stack` publicly provides `ProjectorReg`, `DatabaseDriver`, `EsStack`,
+`SharedStack`, `EsStores`, `build`, `build_with_driver`, `build_stores`, and
+`apply_snapshot_policy`; `arc-ffi` provides `FfiRuntime`, `FfiCore`,
+`CoreRegistry`, `CoreKey`, `FfiError`, and `build_stack`. Existing public
+`arc-web` stack/config paths remain re-exports of those same types and functions.
+
+Checks reported passing by the implementation worktrees: `CARGO_BUILD_JOBS=4
+make check`, `make test`, `make lint`, `make doctor`,
+`bash scripts/check-publish-packages.sh`, isolated arc-stack downstream
+compatibility checks (default, no-default, PostgreSQL, all features), arc-ffi
+feature-matrix tests, dependency isolation, doctor regression fixtures, and the
+native Kotlin/JVM create/read smoke. The live PostgreSQL schema test was not run
+because `ARC_POSTGRES_TEST_DATABASE_URL` was unset. Swift binding generation
+passed; Swift compile/run was not run because no Swift compiler was configured.
+Android app migration and final pushed-head CI remain pending; nothing was
+published.
+
+The changes are additive and are a 0.8.12 candidate. No persisted schema or
+legacy Arc web import path changes. The native Android consumer still needs a
+separate migration to `arc-stack` and `arc-ffi`; no release is authorized here.

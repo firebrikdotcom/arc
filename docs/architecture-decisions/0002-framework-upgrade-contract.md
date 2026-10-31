@@ -20,10 +20,12 @@ authored-vs-generated split into a whole-framework ownership contract, and attac
 policy and upgrade path that make "upgrade without starting from scratch" a stated guarantee
 instead of a hope.
 
-The reusable crates (`arc-core`, `arc-es-sqlite`, `arc-es-postgres`, `arc-es-nats`, `arc-web`) share
-the workspace version (currently `0.8.6`). The reusable crates have publish-ready metadata;
-the v0.8.6 release workflow completed successfully. `arc-web` is the framework web/runtime crate; `arc-app`
-(package `arc`) is the thin user-owned application template that depends on it.
+The published reusable crates share the workspace version (latest published
+0.8.11). Source now also includes the unpublished 0.8.12 candidates `arc-stack`
+and `arc-ffi`. `arc-stack` owns headless event-sourced stack assembly; `arc-web`
+is the web adapter and preserves its prior stack/config paths as re-exports;
+`arc-ffi` supplies native adapter infrastructure. `arc-app` (package `arc`) is
+the thin user-owned web application template.
 
 ## Decision
 
@@ -84,11 +86,13 @@ migrations (and always announced in release notes).
 - Application migrations and seeders (`crates/arc-app/src/database/seeders/`, user-added
   directories under `migrations/`).
 
-**Known boundary debt.** The physical split has landed: framework runtime lives in `crates/arc-web`;
-`crates/arc-app` is the thin user template that depends on it via `ArcApp::builder()`. Remaining
-upgradeability work is packaging and distribution, not the ownership classification:
+**Boundary status.** Framework and application ownership is split across
+headless `arc-stack`, sibling web/native adapters, and the thin `arc-app` web
+template. The reusable source additions remain unpublished pending an
+authorized 0.8.12 release. The Android app migration to `arc-stack` + `arc-ffi`
+is separate follow-up work:
 
-- Publish `arc-web` (and keep it versioned in lockstep with the other `arc-*` crates).
+- Publish the `arc-stack` → `arc-web` and `arc-ffi` additions only in an authorized, validated lockstep release.
 - Ship an `arc new` CLI (or equivalent) so apps start from a thin template instead of
   clone-and-edit of this monorepo.
 

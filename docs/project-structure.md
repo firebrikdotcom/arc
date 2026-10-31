@@ -18,6 +18,11 @@ src/
 
 `ui.rs` exists only when you pass `--ui`.
 
+The reusable framework crates have a separate ownership layout: `arc-stack`
+assembles the headless event stack, `arc-web` adapts it to web deployments,
+and `arc-ffi` provides native async/runtime integration. Android uses FFI only;
+this generated application structure describes the web app.
+
 ## How the files connect
 
 ```text

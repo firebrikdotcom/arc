@@ -24,11 +24,13 @@ Operational guide for agents working in this repository. Keep changes aligned wi
 
 ## Current State
 
-- Rust workspace with five active crates:
+- Rust workspace with active crates including:
   - `crates/arc-core`: event sourcing primitives, aggregates, command bus, event bus traits, projections, read-model traits, audit/access/session/integrity primitives.
   - `crates/arc-es-sqlite`: SQLite event store, read-model store, snapshot persistence, and JWT session revocation store.
   - `crates/arc-es-postgres`: Postgres event store, read-model store, and snapshot persistence (self-initializing schema).
   - `crates/arc-es-nats`: NATS JetStream `EventBus` implementation (the publish side).
+  - `crates/arc-stack`: headless event-sourced stack assembly shared by adapters.
+  - `crates/arc-ffi`: native async runtime and shared core registry for UniFFI consumers.
   - `crates/arc-app`: Actix Web application, Tera templates, Vite assets, auth, API/admin routes, user domain wiring.
 - Backend framework: Actix Web.
 - Write model: command handlers and aggregates through `CommandBus`.
@@ -55,7 +57,7 @@ Important: older planning docs can lag behind code. If docs conflict, prefer cur
 - `crates/arc-app/src/routes.rs`: HTML/API/admin scopes, static asset serving, middleware wiring.
 - `crates/arc-app/src/http/controllers/`: HTTP handlers.
 - `crates/arc-app/src/http/middlewares/`: auth, JWT, idle timeout, rate limiting.
-- `crates/arc-app/src/helpers/`: sessions, CSRF, templates, forms, JWT, ES stack assembly.
+- `crates/arc-app/src/helpers/`: sessions, CSRF, templates, forms, and JWT; shared stack assembly is owned by `arc-stack` and `arc-web` retains compatibility re-exports.
 - `crates/arc-app/src/domain/user/`: User aggregate, commands, projector.
 - `crates/arc-app/src/resources/`: CSS, JS, images, Tera views.
 - `config/benthos/`: Benthos (Redpanda Connect) routing pipeline(s) that consume `events.>`.
