@@ -989,6 +989,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn in_memory_and_sqlite_stores_return_the_same_timestamp() {
+        use arc_core::event_store::InMemoryEventStore;
+
+        let sqlite = setup_test_store().await;
+        let memory = InMemoryEventStore::new();
+        let mut event = stamped_event("User", "precision-user", 1, "UserCreated", json!({}));
+        event.timestamp = 1_700_000_000_789;
+        for store in [&sqlite as &dyn EventStore, &memory as &dyn EventStore] {
+            store
+                .append_to(
+                    "User",
+                    "precision-user",
+                    VersionCheck::New,
+                    vec![event.clone()],
+                )
+                .await
+                .unwrap();
+        }
+
+        let from_sqlite = sqlite
+            .load_event("User", "precision-user", 1)
+            .await
+            .unwrap();
+        let from_memory = memory
+            .load_event("User", "precision-user", 1)
+            .await
+            .unwrap();
+        assert_eq!(
+            from_sqlite.as_ref().map(|event| event.timestamp),
+            Some(1_700_000_000_000)
+        );
+        assert_eq!(from_memory, from_sqlite);
+    }
+
+    #[tokio::test]
     async fn load_event_verifies_the_persisted_integrity_signature() {
         let store = setup_integrity_test_store().await;
         let mut first = stamped_event("User", "integrity-user", 1, "UserCreated", json!({"v": 1}));

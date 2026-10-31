@@ -8,7 +8,6 @@ use crate::http::middlewares::{
     auth_middleware::AuthMiddleware, idle_timeout_middleware::IdleTimeoutMiddleware,
     jwt_middleware::JwtMiddleware,
 };
-use crate::websocket;
 use actix_files as fs;
 use actix_web::http::header::{CACHE_CONTROL, ETAG, IF_NONE_MATCH};
 use actix_web::{get, web, Error, HttpRequest, HttpResponse, Responder};
@@ -86,7 +85,12 @@ pub async fn health() -> impl Responder {
     }))
 }
 
-/// Registers all application routes: health check, auth, admin, API (v1 + legacy), WebSocket, and static files.
+/// Registers all application routes: health check, auth, admin, API (v1 + legacy), and static files.
+///
+/// `/ws` is deliberately not mounted. No page subscribes to a room and nothing
+/// here broadcasts, and the browser login keeps only a cached `SessionUser`
+/// with no server-side handle that a `WebSocketPrincipalProvider` could verify.
+/// An app that needs sockets wires them as described in docs/websocket-security.md.
 pub fn config(cfg: &mut web::ServiceConfig) {
     cfg
         // Health check
@@ -137,8 +141,6 @@ pub fn config(cfg: &mut web::ServiceConfig) {
                 .service(admin_controller::profile_post)
                 .service(admin_controller::profile_password_post),
         )
-        // WebSocket endpoint
-        .route("/ws", web::get().to(websocket::connection::ws_handler))
         .service(static_file);
 
     // Diagnostic endpoints — only mounted when APP_ENV=e2e so production
@@ -174,6 +176,30 @@ mod tests {
         fs::remove_file("./dist/styles.css").unwrap();
 
         assert_eq!(resp.status(), http::StatusCode::OK);
+    }
+
+    #[actix_web::test]
+    async fn websocket_endpoint_is_not_mounted() {
+        let app = test::init_service(App::new().configure(config)).await;
+
+        let req = test::TestRequest::get()
+            .uri("/ws")
+            .insert_header((http::header::ORIGIN, "http://127.0.0.1:18080"))
+            .insert_header((http::header::CONNECTION, "Upgrade"))
+            .insert_header((http::header::UPGRADE, "websocket"))
+            .insert_header((http::header::SEC_WEBSOCKET_VERSION, "13"))
+            .insert_header((http::header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ=="))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+    }
+
+    #[actix_web::test]
+    async fn admin_page_does_not_open_a_websocket() {
+        let page = include_str!("resources/views/admin/index.html");
+        assert!(!page.contains("websocket"));
+        let script = include_str!("resources/js/script.js");
+        assert!(!script.contains("websocket"));
     }
 
     #[actix_web::test]

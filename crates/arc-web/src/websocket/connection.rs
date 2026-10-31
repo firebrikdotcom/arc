@@ -179,3 +179,48 @@ pub async fn ws_handler(
 
     ws::start(ws_connection, &req, stream)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_session::{storage::CookieSessionStore, SessionMiddleware};
+    use actix_web::{cookie::Key, http::StatusCode, test, App};
+
+    const ALLOWED: &str = "http://127.0.0.1:18080";
+
+    async fn handshake_status(origin: &str) -> StatusCode {
+        let origins = WebSocketOriginAllowlist::new([ALLOWED]).unwrap();
+        let app = test::init_service(
+            App::new()
+                .wrap(SessionMiddleware::new(
+                    CookieSessionStore::default(),
+                    Key::generate(),
+                ))
+                .app_data(web::Data::new(origins))
+                .app_data(web::Data::new(WsServer::new().start()))
+                .route("/ws", web::get().to(ws_handler)),
+        )
+        .await;
+        let req = test::TestRequest::get()
+            .uri("/ws")
+            .insert_header((actix_web::http::header::ORIGIN, origin))
+            .to_request();
+        test::call_service(&app, req).await.status()
+    }
+
+    #[actix_web::test]
+    async fn allowed_origin_without_a_principal_provider_is_unavailable() {
+        assert_eq!(
+            handshake_status(ALLOWED).await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+
+    #[actix_web::test]
+    async fn origin_check_runs_before_the_provider_check() {
+        assert_eq!(
+            handshake_status("http://evil.example.test").await,
+            StatusCode::FORBIDDEN
+        );
+    }
+}

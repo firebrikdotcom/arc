@@ -143,6 +143,14 @@ impl Event {
         self
     }
 
+    /// Round `timestamp` down to whole seconds, the precision the SQLite and
+    /// Postgres stores persist. `CommandBus` and `InMemoryEventStore` apply
+    /// this so every store returns the same `timestamp` for the same event.
+    pub fn with_stored_timestamp_precision(mut self) -> Self {
+        self.timestamp -= self.timestamp % 1_000;
+        self
+    }
+
     /// Serialize event to JSON string.
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string(self)

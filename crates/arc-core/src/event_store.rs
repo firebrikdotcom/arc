@@ -328,7 +328,12 @@ mod in_memory {
                 }
             }
 
-            store.extend(events);
+            // Match the SQL stores, which persist whole seconds.
+            store.extend(
+                events
+                    .into_iter()
+                    .map(Event::with_stored_timestamp_precision),
+            );
             Ok(())
         }
 
@@ -360,7 +365,12 @@ mod in_memory {
                 }
             }
 
-            store.extend(events);
+            // Match the SQL stores, which persist whole seconds.
+            store.extend(
+                events
+                    .into_iter()
+                    .map(Event::with_stored_timestamp_precision),
+            );
             Ok(())
         }
 
@@ -607,7 +617,11 @@ mod tests {
             .unwrap();
         let loaded = store.load("u1").await.unwrap();
         assert_eq!(loaded.len(), 1);
-        assert_eq!(store.load_event("User", "u1", 1).await.unwrap(), Some(e));
+        // Like the SQL stores, the in-memory store keeps whole seconds.
+        assert_eq!(
+            store.load_event("User", "u1", 1).await.unwrap(),
+            Some(e.with_stored_timestamp_precision())
+        );
         assert_eq!(store.load_event("Order", "u1", 1).await.unwrap(), None);
         assert_eq!(store.load_event("User", "u1", 2).await.unwrap(), None);
     }

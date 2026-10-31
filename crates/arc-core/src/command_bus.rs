@@ -321,9 +321,10 @@ impl<A: Aggregate> CommandBus<A> {
             })?;
         let new_events: Vec<Event> = new_events
             .into_iter()
-            .map(|mut event| {
-                event.timestamp = (event.timestamp / 1_000) * 1_000;
-                event.with_audit(audit.clone())
+            .map(|event| {
+                event
+                    .with_stored_timestamp_precision()
+                    .with_audit(audit.clone())
             })
             .collect();
 

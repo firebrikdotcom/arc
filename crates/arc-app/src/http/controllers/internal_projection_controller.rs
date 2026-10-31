@@ -141,6 +141,8 @@ mod tests {
             }),
         })
         .with_audit(AuditMetadata::test_default())
+        // CommandBus stores and publishes whole-second timestamps.
+        .with_stored_timestamp_precision()
     }
 
     fn build_projection_engine(

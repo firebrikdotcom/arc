@@ -103,3 +103,15 @@ calling the protected service. Missing `jti` returns 401 by default. The explici
 `JWT_GRANDFATHER_LEGACY` opt-in permits legacy tokens only when store wiring exists.
 Revoked or unknown sessions reject with 401; store failures reject with 503. See
 [security coverage](security-test-coverage.md) for real HTTP regression cases.
+
+## Open WebSockets
+
+Revocation is checked when a WebSocket connects, not while it stays open. The
+`/ws` handshake resolves the browser identity through the identity store and
+rejects revoked, expired, or disabled identities (see
+[WebSocket security](websocket-security.md)). A socket that was already open
+keeps running after logout, session revocation, or account disablement, and
+keeps receiving that user's broadcasts until it disconnects. Its next
+reconnect is rejected. Arc does not close live sockets on revocation today:
+`WsServer` has no message that disconnects a user's connections, so adding one
+is tracked as a follow-up (TM-11 residual risk).
