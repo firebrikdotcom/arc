@@ -195,6 +195,13 @@ pub(crate) async fn run(
     let driver = DatabaseDriver::from_env();
     info!(driver = driver.as_str(), "Selected database driver");
 
+    // Check every supplied stack before any registration builds or connects to
+    // NATS, so the error does not depend on registration order.
+    for registration in &registrations {
+        if registration.supplied_stack {
+            ensure_supplied_stack_event_bus(registration.aggregate_type)?;
+        }
+    }
     let mut aggregate_runtimes = Vec::with_capacity(registrations.len());
     for registration in registrations {
         info!(
