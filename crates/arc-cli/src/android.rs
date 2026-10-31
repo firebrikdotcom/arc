@@ -308,16 +308,10 @@ fn diagnostics(probe: &impl Probe) -> Vec<String> {
         );
     }
     let emulator = sdk.join("emulator/emulator");
-    let emulator_version = if probe.file(&emulator) {
-        emulator
-            .to_str()
-            .and_then(|path| probe.command(path, &["-version"]))
-    } else {
-        None
-    }
-    .or_else(|| probe.command("emulator", &["-version"]));
-    if emulator_version.is_none() {
-        result.push("ERROR: Android emulator tool not found; install Android SDK emulator and add it to PATH".into());
+    let emulator_found =
+        probe.file(&emulator) || probe.command("emulator", &["-version"]).is_some();
+    if !emulator_found {
+        result.push("WARN: Android emulator tool not found; install the Android SDK emulator to run make e2e-emulator".into());
     }
     let device = probe
         .env("E2E_DEVICE")
@@ -735,8 +729,11 @@ mod tests {
         let messages = diagnostics(&Fixture::default());
         assert_eq!(
             messages.iter().filter(|m| m.starts_with("ERROR:")).count(),
-            10
+            9
         );
+        assert!(messages
+            .iter()
+            .any(|m| m.starts_with("WARN: Android emulator tool not found")));
         for expected in [
             "cargo/rustc/rustup",
             "cargo-ndk",
@@ -747,7 +744,6 @@ mod tests {
             "aarch64-linux-android, x86_64-linux-android",
             "JDK 17 or newer",
             "adb not found",
-            "emulator tool",
         ] {
             assert!(
                 messages.iter().any(|m| m.contains(expected)),
@@ -844,10 +840,15 @@ mod tests {
         );
         assert!(diagnostics(&f).is_empty());
 
+        // File present but -version failing: still found, no diagnostics.
         f.commands.remove("/sdk/emulator/emulator -version");
-        assert!(diagnostics(&f)
-            .iter()
-            .any(|message| message.contains("emulator tool")));
+        assert!(diagnostics(&f).is_empty());
+
+        // Nothing found: WARN only, never ERROR.
+        f.files.remove(&PathBuf::from("/sdk/emulator/emulator"));
+        let d = diagnostics(&f);
+        assert_eq!(d, vec!["WARN: Android emulator tool not found; install the Android SDK emulator to run make e2e-emulator"]);
+        assert!(!d.iter().any(|m| m.starts_with("ERROR:")));
         f.commands.insert(
             "emulator -version".into(),
             "Android emulator version".into(),
