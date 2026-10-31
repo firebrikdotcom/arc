@@ -29,7 +29,7 @@ async fn main() -> std::io::Result<()> {
         "test fixture requires explicit opt-in"
     );
     std::env::set_var("JWT_SECRET", "fixture-only-secret-at-least-32-bytes");
-    let path = format!("/tmp/arc-nineties-security-{}.db", uuid::Uuid::new_v4());
+    let path = format!("/tmp/arc-test-security-{}.db", uuid::Uuid::new_v4());
     std::env::set_var("DATABASE_DRIVER", "sqlite");
     std::env::set_var("ARC_SETUP_ADMIN_NAME", "fixture-admin");
     std::env::set_var("ARC_SETUP_ADMIN_EMAIL", "fixture-admin@example.test");

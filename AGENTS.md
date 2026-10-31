@@ -147,7 +147,7 @@ Important: older planning docs can lag behind code. If docs conflict, prefer cur
 - Auth/profile tests can touch migrations, seeders, session middleware, CSRF behavior, and projections.
 - If you change auth, forms, migrations, projection behavior, or session behavior, update or add focused tests.
 - If you change NATS publishing behavior, cover publish acks, subject naming (`events.<aggregate_type>.<event_type>`, snake_case), and event serialization. Routing/consumer behavior lives in Benthos pipelines (`config/benthos/`), validated with `benthos lint` and routing integration tests. Projection integration tests should prove Benthos calls Arc-owned projection code; do not test or introduce Benthos SQL/database writes.
-- Docker-backed tests must use project-scoped names and labels, for example `arc-nineties-*` plus `arc.project=nineties`, and must remove their containers on every success, skip, timeout, and failure path. Never leave anonymous NATS/Benthos test containers running.
+- Docker-backed tests must use project-scoped names and labels, for example `arc-test-*` plus `arc.project=arc`, and must remove their containers on every success, skip, timeout, and failure path. Never leave anonymous NATS/Benthos test containers running.
 
 ## Current Priorities
 

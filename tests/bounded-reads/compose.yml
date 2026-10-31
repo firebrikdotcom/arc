@@ -3,7 +3,7 @@ services:
     build:
       context: .
     working_dir: /work
-    labels: {arc.project: nineties, arc.lane: bounded-reads}
+    labels: {arc.project: arc, arc.lane: bounded-reads}
     environment:
       CARGO_BUILD_JOBS: '2'
       CARGO_INCREMENTAL: '0'
@@ -18,7 +18,7 @@ services:
     command: ['sleep', 'infinity']
   postgres:
     image: postgres:16-alpine
-    labels: {arc.project: nineties, arc.lane: bounded-reads}
+    labels: {arc.project: arc, arc.lane: bounded-reads}
     environment: {POSTGRES_USER: arc, POSTGRES_PASSWORD: arc, POSTGRES_DB: arc}
     tmpfs: [/var/lib/postgresql/data]
     healthcheck:
@@ -28,4 +28,4 @@ services:
       retries: 30
 volumes:
   cache:
-    labels: {arc.project: nineties, arc.lane: bounded-reads}
+    labels: {arc.project: arc, arc.lane: bounded-reads}

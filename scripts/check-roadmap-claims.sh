@@ -103,7 +103,7 @@ need_file "Dockerfile"          "Dockerfile present"
 need_file "docker-compose.yml"  "compose present"
 
 # ---------------------------------------------------------------------------
-# Drift checks added after nineties-status-audit
+# Drift checks added after arc-status-audit
 # ---------------------------------------------------------------------------
 if [ -f ".github/workflows/tests.yml" ]; then
   echo "STALE WORKFLOW: .github/workflows/tests.yml should not duplicate ci.yml" >&2

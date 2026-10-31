@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import fs from 'node:fs';
-const receiptPath = process.env.ARC_AUDIT_RECEIPT || '/tmp/arc-nineties-durable-audit-receipt.json';
+const receiptPath = process.env.ARC_AUDIT_RECEIPT || '/tmp/arc-test-durable-audit-receipt.json';
 test('before restart: real browser disclosure commits metadata; locked journal withholds PHI', async ({page, request}) => {
   const boot = await (await request.get('/health')).text();
   expect(boot).toMatch(/^durable-audit-fixture:/);

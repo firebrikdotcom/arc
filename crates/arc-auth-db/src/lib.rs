@@ -481,10 +481,7 @@ mod browser_tests {
     }
     #[tokio::test]
     async fn migration_upgrade_and_durable_invalidation() {
-        let db = Database(format!(
-            "/tmp/arc-nineties-session-{}.sqlite",
-            Uuid::new_v4()
-        ));
+        let db = Database(format!("/tmp/arc-test-session-{}.sqlite", Uuid::new_v4()));
         let store = DbIdentityStore::new(&db.0);
         let mut c = store.connect().unwrap();
         c.batch_execute(IDENTITY_ROLES_MIGRATION).unwrap();

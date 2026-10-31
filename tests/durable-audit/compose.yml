@@ -4,10 +4,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ${ARC_AUDIT_TEST_IMAGE:-arc-nineties-durable-audit-test:local}
+    image: ${ARC_AUDIT_TEST_IMAGE:-arc-test-durable-audit-test:local}
     working_dir: /work
     labels:
-      arc.project: nineties
+      arc.project: arc
       arc.lane: durable-audit
     environment:
       CARGO_BUILD_JOBS: '2'
