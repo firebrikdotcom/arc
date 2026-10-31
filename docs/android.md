@@ -71,10 +71,13 @@ storage as part of an update.
 
 The project includes Rust and Kotlin source, Gradle files and wrapper, a root
 Makefile, and `.arc/android.json`. The manifest identifies the project and
-records a SHA-256 hash of every file and registration block as Arc wrote it,
-for the project skeleton and for each resource. Ownership is checked against
-those recorded hashes, never against what a newer CLI's templates would
-render, so upgrading the CLI does not block adding resources.
+records a SHA-256 hash of each resource's files and registration blocks as Arc
+wrote them. Resource ownership is checked against those recorded hashes, never
+against what a newer CLI's templates would render, so upgrading the CLI does
+not block adding resources. The skeleton `files` hashes are only a baseline
+recorded by `arc new`: nothing reads or refreshes them, and shared files such
+as `ffi.rs` or `ResourceCatalog.kt` diverge from them by design once resource
+blocks are inserted.
 
 Adding a resource writes only its own new files, its blocks at the named
 markers in shared files, and the manifest. You can edit another resource's

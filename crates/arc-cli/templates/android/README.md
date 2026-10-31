@@ -26,7 +26,7 @@ Rust and generated Kotlin components load the same {{crate-name}} native library
 
 Resources apply embedded SQL migrations once at core open under an IMMEDIATE transaction.
 The app database is filesDir/app.sqlite. Existing data is retained; down migrations never run automatically.
-The managed .arc/android.json manifest records a SHA-256 hash of each generated file and block,
+The managed .arc/android.json manifest records a SHA-256 hash of each resource's files and blocks (the skeleton hashes are an unchecked baseline),
 and named registration markers support resource generation. Editing one resource never blocks adding another,
 and Arc never overwrites your edits; repeating a resource whose files you changed is reported as a conflict.
 

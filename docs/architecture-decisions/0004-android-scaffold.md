@@ -62,7 +62,7 @@ package-name override.
 files and checked-in wrapper (scripts and jar), `app/`, `rust/`, and a
 host-only `tools/uniffi-bindgen/` workspace. The manifest uses
 `format_version=2` and records the Android target, original and normalized
-names, application ID, SHA-256 hashes of the generated skeleton files, and
+names, application ID, an unchecked SHA-256 baseline of the generated skeleton files, and
 registered resources. Format 1 manifests, which stored whole file bodies and
 no skeleton hashes, remain readable and are upgraded when a resource is added. Rust is a standalone
 workspace with `rlib` and `cdylib` outputs, domain modules, migrations and
@@ -111,7 +111,7 @@ They expose typed CRUD operations and errors; writes are not automatically
 retried after an uncertain result. The generated chooser lists registered
 resources. Generation preflights names, normalized collisions, files and
 registration markers before writing. `.arc/android.json` records generated
-ownership as SHA-256 hashes taken at generation time; checks compare files
+resource ownership as SHA-256 hashes taken at generation time (skeleton hashes are an unchecked baseline); checks compare resource files
 with those hashes, never with a fresh render, so template changes in later CLI
 versions do not block new resources. Adding a resource checks only its own
 targets and the shared markers, so edits to another resource's files do not

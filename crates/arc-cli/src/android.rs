@@ -469,7 +469,7 @@ const FILES: &[(&str, &[u8])] = &[
     ),
     (
         "rust/Cargo.toml",
-        include_bytes!("../templates/android/rust/Cargo.toml"),
+        include_bytes!("../templates/android/rust/Cargo.toml.tpl"),
     ),
     (
         "rust/migrations/00000000000000_arc_base/down.sql",
@@ -509,7 +509,7 @@ const FILES: &[(&str, &[u8])] = &[
     ),
     (
         "tools/uniffi-bindgen/Cargo.toml",
-        include_bytes!("../templates/android/tools/uniffi-bindgen/Cargo.toml"),
+        include_bytes!("../templates/android/tools/uniffi-bindgen/Cargo.toml.tpl"),
     ),
     (
         "tools/uniffi-bindgen/src/main.rs",

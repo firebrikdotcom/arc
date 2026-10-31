@@ -193,10 +193,11 @@ def main():
         if not serial:
             fail("DEVICE is required; use make deploy DEVICE=<adb-serial>")
         device_ready(serial)
+        version_name, version_code = app_version()
+        print(f"Deploying {PACKAGE} versionName={version_name} versionCode={version_code}")
         build()
         run(["adb", "-s", serial, "install", "-r", "app/build/outputs/apk/debug/app-debug.apk"])
         run(["adb", "-s", serial, "shell", "am", "start", "-W", "-n", PACKAGE + "/.MainActivity"])
-        version_name, version_code = app_version()
         info = output(["adb", "-s", serial, "shell", "dumpsys", "package", PACKAGE])
         if not re.search(r"\bversionName=" + re.escape(version_name) + r"(\s|$)", info) or not re.search(r"\bversionCode=" + version_code + r"\b", info):
             fail("installed package/version verification failed")
