@@ -1,9 +1,14 @@
 # Arc Project Progress
 
-**Last updated:** 2026-10-30
-**Current development version:** 0.8.11
-**Latest published version:** 0.8.11
-**Status:** v0.8.11 adds a collapsible navigation rail to the generated admin layout
+**Last updated:** 2026-10-31
+**Current development version:** 0.9.0
+**Latest published version:** 0.9.0
+**Status:** v0.9.0, published to crates.io, is the Phase 2 release: WebSocket and
+projection security hardening (breaking; see [Upgrading](docs/upgrading.md)), the
+headless `arc-stack` and native `arc-ffi` adapters (first published in this release),
+and `arc new <name> --android`, whose generated projects now depend on the published
+Arc crates pinned to the CLI version. All fourteen matching 0.9.0 crates are published
+to crates.io. v0.8.11 adds a collapsible navigation rail to the generated admin layout
 and makes the repository app use the same Workbench design as `arc new --ui`. All twelve
 matching 0.8.11 crates are published to crates.io. v0.8.10 fixes command-specific `--help` and `-h` across the Arc CLI,
 without generating files or executing plugin operations. Release assets explicitly
@@ -40,9 +45,10 @@ take precedence when a claim here becomes stale.
   instrumentation tests plus in-place reinstall persistence), the generated
   host integration test, and the Android scaffold CI workflow. Emulator mode
   refuses physical serials. JDK 17 or newer is required.
-- 0.9.0 publication remains unauthorized. Until a release is separately
-  approved and available, generated projects require a matching local Arc
-  checkout and use its recorded path dependencies.
+- 2026-10-31: 0.9.0 is published to crates.io. `arc new <name> --android`
+  no longer needs a local checkout: generated projects pin `arc-core`,
+  `arc-stack`, and `arc-ffi` to the CLI's own version. `--arc-path PATH` or
+  `ARC_PATH` remains an opt-in for local framework development.
 - Emulator E2E is limited to an explicitly selected emulator. Deployment
   requires an explicit serial and installs in place without clearing data.
   See [Your first Android app](docs/android.md).
@@ -57,13 +63,13 @@ take precedence when a claim here becomes stale.
   U-1 sets Android to FFI-only and reserves web UIs for web deployments; U-2
   creates `arc-ffi`. Q-8..Q-13 mobile web/both requirements are historical and
   superseded. The Android app migration to `arc-stack` + `arc-ffi` remains open.
-- Implemented 0.9.0 candidate behavior change: SQLite uses a 5-second busy
+- 0.9.0 behavior change: SQLite uses a 5-second busy
   timeout on new/replacement event-store and read-model connections and
   IMMEDIATE append transactions; journal mode is unchanged. Local measurement:
   160 simultaneous appends from eight workers plus projections succeeded in
   0.12–0.15 seconds; same-stream contenders produced one commit and a typed
-  `ConcurrencyConflict`. The SQLite behavior change and crate additions remain
-  unpublished. A 0.9.0 release needs authorization; nothing has been published.
+  `ConcurrencyConflict`. The SQLite behavior change and crate additions are
+  part of 0.9.0, published to crates.io on 2026-10-31.
 - Reported passing framework checks (CARGO_BUILD_JOBS=4): `make check`,
   `make test`, `make lint`, `make doctor`, `bash scripts/check-publish-packages.sh`,
   isolated compatibility/feature checks, dependency isolation and regression
@@ -71,8 +77,8 @@ take precedence when a claim here becomes stale.
   run (`ARC_POSTGRES_TEST_DATABASE_URL` unset); Swift compile/run was not run
   (compiler unavailable); Android migration and final pushed-head CI are pending.
 - Follow-ups: migrate `arc-android-prototype` to the shared stack and native
-  adapter while preserving app identity/data; obtain release authorization;
-  complete final CI on the pushed candidate. See coordination handoff section 7.
+  adapter while preserving app identity/data. Release authorization (U-9) and
+  0.9.0 publication are done. See coordination handoff section 7.
 
 ## Single Workbench design — 2026-10-19
 

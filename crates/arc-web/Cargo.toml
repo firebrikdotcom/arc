@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 description = "Arc framework runtime: Actix/Tera web machinery, event-sourcing wiring, and the application builder seam."
+readme = "../../README.md"
+keywords = ["arc", "actix", "event-sourcing", "cqrs", "web"]
 license.workspace = true
 repository.workspace = true
 
@@ -21,12 +23,12 @@ postgres = ["arc-stack/postgres"]
 test-utils = []
 
 [dependencies]
-arc-auth-core = { path = "../arc-auth-core", version = "0.8.11" }
+arc-auth-core = { path = "../arc-auth-core", version = "0.9.0" }
 # Workspace crates
-arc-core = { path = "../arc-core", version = "0.8.11" }
-arc-stack = { path = "../arc-stack", version = "0.8.11", default-features = false, features = ["sqlite"] }
-arc-es-sqlite = { path = "../arc-es-sqlite", version = "0.8.11" }
-arc-es-nats = { path = "../arc-es-nats", version = "0.8.11", optional = true }
+arc-core = { path = "../arc-core", version = "0.9.0" }
+arc-stack = { path = "../arc-stack", version = "0.9.0", default-features = false, features = ["sqlite"] }
+arc-es-sqlite = { path = "../arc-es-sqlite", version = "0.9.0" }
+arc-es-nats = { path = "../arc-es-nats", version = "0.9.0", optional = true }
 
 # Web framework
 actix-web.workspace = true
@@ -77,5 +79,5 @@ async-trait.workspace = true
 sqlx = { version = "0.8.6", default-features = false, features = ["sqlite", "runtime-tokio-rustls"] }
 
 [dev-dependencies]
-arc-core = { path = "../arc-core", version = "0.8.11", features = ["test-utils"] }
+arc-core = { path = "../arc-core", version = "0.9.0", features = ["test-utils"] }
 serial_test.workspace = true

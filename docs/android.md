@@ -2,12 +2,13 @@
 
 This guide creates a native Android application that uses Arc through UniFFI.
 It does not add a web server or copy the Android prototype into your project.
-The generated project uses local Arc crate paths until an authorized 0.9.0
-release is published.
+The generated project depends on the published `arc-core`, `arc-stack`, and
+`arc-ffi` crates, pinned to the same version as your `arc` CLI (0.9.0,
+published to crates.io).
 
 ## Before you start
 
-Use Linux with a matching Arc checkout. Android builds need the Rust toolchain
+Use Linux. Android builds need the Rust toolchain
 and Android Rust targets, `cargo-ndk`, JDK 17 or newer, Android SDK platform 36,
 build-tools 35.0.0, NDK 27.0.12077973, `adb`, and the Android emulator tools.
 Start an Android Virtual Device before the emulator test. `arc doctor --android`
@@ -15,23 +16,20 @@ checks these tools without installing anything or downloading packages. It
 reports missing items and gives the relevant installation command. A running
 emulator is needed for emulator tests, not for generating the project.
 
-The project generator also needs the Arc source checkout. Set `ARC_PATH` to
-that checkout, or pass `--arc-path PATH` to `arc new`; the explicit option takes
-precedence. It verifies `arc-core`, `arc-stack`, and `arc-ffi` before writing
-the project. Generated manifests retain absolute paths to that checkout, so
-keep it available while building.
+The generated `rust/Cargo.toml` pins each direct Arc crate to the CLI's exact
+version, for example `arc-ffi = { version = "=0.9.0" }`, so upgrading Arc in an
+existing project is a deliberate edit of those three lines.
 
 ## Create, build, and test
 
 Run these commands in order from a working directory where you want the new
-project. This sequence was verified with JDK 21, NDK 27, and the
+project. The build and emulator steps were verified with JDK 21, NDK 27, and the
 `emulator-5580` Medium_Phone_API_36.1 virtual device.
 
 ```bash
-export ARC_PATH=/path/to/arc-checkout
-cargo install --path "$ARC_PATH/crates/arc-cli" --locked --force
+cargo install arc-web-cli --version 0.9.0 --locked
 arc doctor --android
-arc new smoke-notes --android --arc-path "$ARC_PATH" --no-git
+arc new smoke-notes --android --no-git
 cd smoke-notes
 arc generate resource Note --ffi
 arc generate resource Tag --ffi
@@ -41,9 +39,8 @@ make build
 make e2e-emulator E2E_DEVICE=emulator-5580
 ```
 
-`cargo install` uses the local CLI source. It does not install an unpublished
-CLI version from crates.io. `arc new` creates the Android project and its
-manifest. `arc generate resource` adds a native resource; resource names use
+`cargo install` installs the `arc` CLI from crates.io. `arc new` creates the
+Android project and its manifest. `arc generate resource` adds a native resource; resource names use
 the same validation and normalization rules as Arc's other resource
 generators. `make bindings` generates Kotlin bindings for the app and
 `arc-ffi`. `make test` runs the Rust and JVM unit tests. `make build` builds Rust
@@ -66,6 +63,21 @@ package/version check against the `versionName` and `versionCode` in
 device you intend to update. Deployment does not run instrumentation, uninstall
 the app, or clear its data. Do not use `adb uninstall` or clear application
 storage as part of an update.
+
+## Developing against a local Arc checkout
+
+Framework contributors can build a generated project against an Arc source
+checkout instead of crates.io. Pass `--arc-path PATH` to `arc new`, or set
+`ARC_PATH`; the explicit option takes precedence. The generator verifies the
+checkout's `arc-core`, `arc-stack`, and `arc-ffi` manifests before writing
+anything, then emits absolute path dependencies with the checkout's version.
+Keep that checkout available while building. `--arc-path` is valid only with
+`--android`.
+
+```bash
+cargo install --path /path/to/arc-checkout/crates/arc-cli --locked --force
+arc new smoke-notes --android --arc-path /path/to/arc-checkout --no-git
+```
 
 ## What the generator owns
 

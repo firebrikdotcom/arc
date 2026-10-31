@@ -1,18 +1,20 @@
 # Published Packages
 
-The latest published package version is **0.8.11**. Source version **0.8.11** gives
-the generated admin layout a collapsible navigation rail (`public/workbench.js`) and
-makes the repository app use the same Workbench design. Install this source release
-directly from its tag:
+The latest published package version is **0.9.0**. Source version **0.9.0** is the
+Phase 2 release: it hardens WebSocket and projection security (with breaking changes;
+see [Upgrading](upgrading.md#phase-2-security-hardening-090--compatibility-notes)),
+adds the headless `arc-stack` and native `arc-ffi` adapters, and adds native Android
+scaffolding with `arc new <name> --android`. Install the CLI from crates.io:
 
 ```bash
-cargo install --git https://github.com/firebrikdotcom/arc --tag v0.8.11 arc-web-cli --locked --force
+cargo install arc-web-cli --version 0.9.0 --locked --force
 ```
 
-All twelve matching 0.8.11 packages are published to crates.io. The newly added
-`arc-stack` and `arc-ffi` packages are source-only 0.9.0 candidates and are not
-published; no release has been authorized. Generated
+All fourteen matching 0.9.0 packages, including the first releases of `arc-stack`
+and `arc-ffi`, are published to crates.io. Generated
 applications resolve the same framework and authentication-plugin versions.
+Version 0.8.11 gives the generated admin layout a collapsible navigation rail
+(`public/workbench.js`); all twelve 0.8.11 packages are published to crates.io.
 Version 0.8.10 adds
 command-specific, read-only CLI help, and all twelve 0.8.10 packages are published
 to crates.io.
@@ -29,8 +31,8 @@ Generated applications use published crates; they do not depend on an Arc reposi
 |---|---|
 | `arc-web-cli` | Installs the `arc` generator command |
 | `arc-core` | Commands, aggregates, events, command bus, projections, read models |
-| `arc-stack` | Headless stack assembly (source addition, unpublished) |
-| `arc-ffi` | Async native adapter runtime and shared core registry (source addition, unpublished; see [Native Adapters](ffi.md)) |
+| `arc-stack` | Headless stack assembly |
+| `arc-ffi` | Async native adapter runtime and shared core registry (see [Native Adapters](ffi.md)) |
 | `arc-web` | Actix runtime, server builder, middleware, and application wiring |
 | `arc-es-sqlite` | SQLite event, read-model, snapshot, and session stores |
 | `arc-es-postgres` | Optional Postgres stores |
@@ -53,8 +55,8 @@ The CLI writes normal Cargo dependencies:
 
 ```toml
 [dependencies]
-arc-core = "0.8.11"
-arc-web = "0.8.11"
+arc-core = "0.9.0"
+arc-web = "0.9.0"
 ```
 
 You may create the same application manually, but then you must also supply the environment bootstrap, migrations, aggregate, routes, and runtime entry point that the CLI normally generates.

@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 description = "Create self-contained Arc applications"
+readme = "../../README.md"
 license.workspace = true
 repository.workspace = true
 keywords = ["arc", "scaffold", "actix", "event-sourcing"]

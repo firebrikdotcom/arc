@@ -6,11 +6,13 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Optional JWT API authentication plugin for Arc"
+readme = "../../README.md"
+keywords = ["arc", "jwt", "authentication", "api", "actix"]
 
 [dependencies]
-arc-auth-core = { path = "../arc-auth-core", version = "0.8.11" }
-arc-core = { path = "../arc-core", version = "0.8.11" }
-arc-web = { path = "../arc-web", version = "0.8.11" }
+arc-auth-core = { path = "../arc-auth-core", version = "0.9.0" }
+arc-core = { path = "../arc-core", version = "0.9.0" }
+arc-web = { path = "../arc-web", version = "0.9.0" }
 actix-web.workspace = true
 async-trait.workspace = true
 serde.workspace = true

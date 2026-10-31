@@ -287,7 +287,7 @@ Usage:
 
 Options:
   --android  Create an FFI-only Compose Android application
-  --arc-path PATH  Local matching Arc checkout (or ARC_PATH)
+  --arc-path PATH  Build against a local Arc checkout instead of crates.io (or ARC_PATH)
   --ui       Add Tera views and browser assets
   --no-git   Do not initialize a Git repository
   -h, --help Show help
@@ -325,7 +325,7 @@ Usage:
 
 Options:
   --android  Create an FFI-only Compose Android application
-  --arc-path PATH  Local matching Arc checkout (or ARC_PATH)
+  --arc-path PATH  Build against a local Arc checkout instead of crates.io (or ARC_PATH)
   --ui       Add Tera views and browser assets
   --api      Add a public JSON endpoint
   --no-git   Do not initialize a Git repository

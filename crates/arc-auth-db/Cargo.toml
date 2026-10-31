@@ -6,10 +6,12 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Database identity and role provider plugin for Arc"
+readme = "../../README.md"
+keywords = ["arc", "authentication", "database", "roles", "identity"]
 
 [dependencies]
-arc-auth-core = { path = "../arc-auth-core", version = "0.8.11" }
-arc-web = { path = "../arc-web", version = "0.8.11" }
+arc-auth-core = { path = "../arc-auth-core", version = "0.9.0" }
+arc-web = { path = "../arc-web", version = "0.9.0" }
 argon2.workspace = true
 async-trait.workspace = true
 diesel.workspace = true

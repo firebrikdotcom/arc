@@ -15,15 +15,15 @@ sqlite = ["arc-stack/sqlite"]
 postgres = ["arc-stack/postgres"]
 
 [dependencies]
-arc-core = { path = "../arc-core", version = "0.8.11" }
-arc-stack = { path = "../arc-stack", version = "0.8.11", default-features = false }
+arc-core = { path = "../arc-core", version = "0.9.0" }
+arc-stack = { path = "../arc-stack", version = "0.9.0", default-features = false }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "net"] }
 thiserror.workspace = true
 tracing.workspace = true
 uniffi = { version = "=0.32.2", default-features = false, optional = true }
 
 [dev-dependencies]
-arc-core = { path = "../arc-core", version = "0.8.11", features = ["test-utils"] }
+arc-core = { path = "../arc-core", version = "0.9.0", features = ["test-utils"] }
 tokio = { version = "1", features = ["macros"] }
 async-trait.workspace = true
 serde_json.workspace = true
