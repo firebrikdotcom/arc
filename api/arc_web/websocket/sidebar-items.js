@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["connection","security","server","turbo_stream"]};

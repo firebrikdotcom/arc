@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["BROWSER_SESSION_KEY","IDENTITY_SESSION_KEY"],"fn":["authenticate","cache_identity","identity","sign_out","websocket_principal_provider"],"struct":["RequireSession","SessionAuthPlugin","SessionCheck","SessionWebSocketPrincipalProvider"],"type":["IdentityStoreData"]};

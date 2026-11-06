@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["apply_snapshot_policy","build","build_stores","build_with_driver"],"struct":["EsStack","EsStores","SharedStack"]};

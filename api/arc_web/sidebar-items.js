@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["check_app_health","check_database_health","validate_environment"],"mod":["commands","helpers","http","ui","websocket"],"struct":["AppState","ArcApp","ArcAppBuilder","PluginSetupContext","ProjectorReg"],"trait":["ArcPlugin"]};

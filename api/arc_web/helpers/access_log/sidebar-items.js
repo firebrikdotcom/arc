@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["correlation_from","identity_from","record_read"],"struct":["AccessLogged","Sensitive"]};

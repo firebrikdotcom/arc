@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["PrincipalResolutionError"],"struct":["OwnUserRoomPolicy","WebSocketOriginAllowlist","WebSocketPrincipal"],"trait":["WebSocketPrincipalProvider","WebSocketRoomPolicy"],"type":["SharedWebSocketRoomPolicy"]};

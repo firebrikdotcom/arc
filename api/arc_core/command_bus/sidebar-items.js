@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["CommandBusError","SnapshotPolicy"],"struct":["CommandBus","CommandContext"],"type":["CommandBusResult"]};

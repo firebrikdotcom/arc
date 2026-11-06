@@ -1,0 +1,95 @@
+# Testing
+
+## Android scaffold acceptance
+
+The repository script generates a temporary Android app, creates two FFI
+resources, and runs binding generation, Rust/JVM tests, APK build, and
+dependency-isolation checks:
+
+```bash
+bash scripts/check-android-scaffold.sh
+```
+
+To include emulator instrumentation and the in-place reinstall persistence
+check, select an emulator explicitly:
+
+```bash
+ARC_ANDROID_E2E=1 E2E_DEVICE=emulator-5580 bash scripts/check-android-scaffold.sh
+```
+
+The opt-in mode rejects physical device serials. Without the opt-in, emulator
+instrumentation is reported as not run.
+
+## Run project checks
+
+```bash
+make check
+make test
+npm run test:verification
+```
+
+The verification-script regressions exercise every required CI dependency's failure status and
+real child-process startup, occupied ports, readiness deadlines, and instance identity. The CI
+summary evaluates all declared dependency results, including coverage; skipped and cancelled jobs
+fail the summary just like failed jobs.
+
+## Test an endpoint
+
+Actix can test handlers without opening a network port:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use actix_web::{test, App};
+
+    #[actix_web::test]
+    async fn health_is_available() {
+        let app = test::init_service(
+            App::new().configure(crate::routes::config)
+        )
+        .await;
+
+        let request = test::TestRequest::get()
+            .uri("/health")
+            .to_request();
+        let response = test::call_service(&app, request).await;
+
+        assert!(response.status().is_success());
+    }
+}
+```
+
+Place this at the bottom of `src/routes.rs` or under a dedicated test module.
+
+## Test aggregate rules directly
+
+Aggregate tests do not require a database:
+
+```rust
+use arc_core::aggregate::Aggregate;
+
+#[actix_web::test]
+async fn product_cannot_be_created_twice() {
+    let mut product = ProductAggregate::default();
+    let created = product
+        .handle(ProductCommand::Create {
+            id: "p1".into(),
+            name: "Notebook".into(),
+        })
+        .await
+        .unwrap();
+
+    product.apply(&created[0]);
+
+    let duplicate = product
+        .handle(ProductCommand::Create {
+            id: "p1".into(),
+            name: "Notebook".into(),
+        })
+        .await;
+
+    assert!(matches!(duplicate, Err(ProductError::AlreadyExists)));
+}
+```
+
+Prefer testing business rules at the aggregate level, projector transformations separately, and only then the complete HTTP path.
