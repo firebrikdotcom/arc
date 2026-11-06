@@ -24,6 +24,9 @@ adapter.
 
 It uses Actix Web, Tera, SQLite or Postgres, NATS JetStream, and Benthos. Browser routes use cookie sessions; API routes use JWT bearer authentication.
 
+Version **0.9.1** is published across all fourteen Arc crates; see the
+[package guide](docs/packages.md) and [changelog](CHANGELOG.md).
+
 ## Quality checks
 
 The [CI workflow](https://github.com/firebrikdotcom/arc/actions/workflows/ci.yml) and

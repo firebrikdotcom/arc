@@ -1,6 +1,6 @@
 # Published Packages
 
-The latest published package version is **0.9.0**. Source version **0.9.1** is the
+The latest published package version is **0.9.1**. Source version **0.9.1** is the
 security and reliability patch described in the [changelog](../CHANGELOG.md). The
 0.9.0 minor release is the Phase 2 release: it hardens WebSocket and projection security (with breaking changes;
 see [Upgrading](upgrading.md#phase-2-security-hardening-090--compatibility-notes)),
@@ -8,11 +8,11 @@ adds the headless `arc-stack` and native `arc-ffi` adapters, and adds native And
 scaffolding with `arc new <name> --android`. Install the latest published CLI from crates.io:
 
 ```bash
-cargo install arc-web-cli --version 0.9.0 --locked --force
+cargo install arc-web-cli --version 0.9.1 --locked --force
 ```
 
-All fourteen matching 0.9.0 packages, including the first releases of `arc-stack`
-and `arc-ffi`, are published to crates.io. Generated
+All fourteen matching 0.9.1 packages are published to crates.io. `arc-stack` and
+`arc-ffi` first joined the lockstep package set in 0.9.0. Generated
 applications resolve the same framework and authentication-plugin versions.
 Version 0.8.11 gives the generated admin layout a collapsible navigation rail
 (`public/workbench.js`); all twelve 0.8.11 packages are published to crates.io.
@@ -56,8 +56,8 @@ The CLI writes normal Cargo dependencies:
 
 ```toml
 [dependencies]
-arc-core = "0.9.0"
-arc-web = "0.9.0"
+arc-core = "0.9.1"
+arc-web = "0.9.1"
 ```
 
 You may create the same application manually, but then you must also supply the environment bootstrap, migrations, aggregate, routes, and runtime entry point that the CLI normally generates.

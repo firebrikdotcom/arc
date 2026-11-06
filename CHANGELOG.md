@@ -4,6 +4,8 @@
 
 ## 0.9.1 — 2026-11-06
 
+All fourteen reusable crates are published to crates.io.
+
 ### Security and reliability
 
 - Contain public asset paths, bind password confirmation to the signed-in account,

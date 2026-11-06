@@ -1,6 +1,6 @@
 # Security test coverage
 
-## Unreleased reliability and security follow-up
+## Published security and reliability follow-up (0.9.1)
 
 The reference app's static handler rejects traversal, absolute paths and symlinks outside `dist`
 while retaining asset caching. Password confirmation resolves the session user's account and
