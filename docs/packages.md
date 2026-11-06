@@ -1,10 +1,11 @@
 # Published Packages
 
-The latest published package version is **0.9.0**. Source version **0.9.0** is the
-Phase 2 release: it hardens WebSocket and projection security (with breaking changes;
+The latest published package version is **0.9.0**. Source version **0.9.1** is the
+security and reliability patch described in the [changelog](../CHANGELOG.md). The
+0.9.0 minor release is the Phase 2 release: it hardens WebSocket and projection security (with breaking changes;
 see [Upgrading](upgrading.md#phase-2-security-hardening-090--compatibility-notes)),
 adds the headless `arc-stack` and native `arc-ffi` adapters, and adds native Android
-scaffolding with `arc new <name> --android`. Install the CLI from crates.io:
+scaffolding with `arc new <name> --android`. Install the latest published CLI from crates.io:
 
 ```bash
 cargo install arc-web-cli --version 0.9.0 --locked --force

@@ -184,6 +184,9 @@ jobs:
       - name: Build frontend assets
         run: npm run build
 
+      - name: Verify CI summary and browser server ownership
+        run: npm run test:verification
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -373,20 +376,8 @@ jobs:
     needs: [quality, build, test, coverage, frontend, benthos, docs, integration, bounded-collections, durable-audit, security-session, android-host]
     if: always()
     steps:
+      - uses: actions/checkout@v4
       - name: Check all jobs
-        run: |
-          if [[ "${{ needs.android-host.result }}" != "success" ]] || \
-             [[ "${{ needs.bounded-collections.result }}" != "success" ]] || \
-             [[ "${{ needs.durable-audit.result }}" != "success" ]] || \
-             [[ "${{ needs.security-session.result }}" != "success" ]] || \
-             [[ "${{ needs.quality.result }}" != "success" ]] || \
-             [[ "${{ needs.build.result }}" != "success" ]] || \
-             [[ "${{ needs.test.result }}" != "success" ]] || \
-             [[ "${{ needs.frontend.result }}" != "success" ]] || \
-             [[ "${{ needs.benthos.result }}" != "success" ]] || \
-             [[ "${{ needs.docs.result }}" != "success" ]] || \
-             [[ "${{ needs.integration.result }}" != "success" ]]; then
-            echo "❌ One or more CI jobs failed"
-            exit 1
-          fi
-          echo "✅ All CI jobs passed"
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: bash scripts/ci-success.sh

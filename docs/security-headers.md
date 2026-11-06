@@ -26,8 +26,8 @@ style, image, font or connection sources and must not be described as a strict C
 or comprehensive XSS protection. Continue escaping template output and enforcing
 CSRF and authorization on the server.
 
-This is intentional: the bundled demo has inline theme/highlighting scripts and CDN
-highlight.js assets; Turbo creates dynamic styles, Toastify changes styles, and Vite
+This is intentional: the bundled demo uses the Workbench layout and locally bundled
+assets; Turbo creates dynamic styles, Toastify changes styles, and Vite
 serves built hashed assets from `/public/`. Generated UI templates currently use
 local `/public/styles.css` without inline JavaScript. The baseline accommodates both,
 as well as same-origin Turbo requests and WebSocket connections. It neither adds
@@ -108,7 +108,7 @@ ports. `CARGO_TARGET_DIR` is respected for isolated build caches.
 
 After `npm ci` and `npm run build`, run
 `node scripts/check-security-assets.mjs <demo-url>` against the bundled demo running
-inside Compose. It checks inline theme initialization, Vite asset loading, cache/304
+inside Compose. It checks Workbench layout rendering, Vite asset loading, cache/304
 behavior, Turbo navigation and visible Toastify output under the baseline policy.
 These checks do not certify an application's custom CSP, HMR allowlist, SSO or TLS
 proxy configuration.

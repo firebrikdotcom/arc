@@ -17,7 +17,7 @@
     <header class="topbar">
         <button type="button" class="rail-toggle" data-rail-toggle aria-expanded="true" aria-label="Collapse navigation"></button>
         <span class="mono">{{ user_name }}</span>
-        <a class="button" href="/signout">Sign out</a>
+        <a class="button" href="/signout" data-turbo-prefetch="false" data-turbo="false">Sign out</a>
     </header>
 
     <main id="workspace" class="workspace">

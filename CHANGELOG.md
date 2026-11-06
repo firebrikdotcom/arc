@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+## 0.9.1 — 2026-11-06
+
+### Security and reliability
+
+- Contain public asset paths, bind password confirmation to the signed-in account,
+  and ignore untrusted forwarding headers in request/login throttles.
+- Keep profile/password CSRF tokens valid across retries and repeated saves;
+  prevent Turbo from prefetching the reference app's Sign out action.
+- Queue NATS publication atomically with event persistence and retry automatically
+  after failures/restarts, preserving event IDs and at-least-once delivery.
+- Reconcile authoritative projection state under reordered/concurrent delivery;
+  retain hidden versioned deletion tombstones to prevent stale replay restoring users.
+- Include the publication queue in generated web/Android migrations and update
+  generated projectors to reconcile authoritative state.
+- Fail the CI summary on every unsuccessful dependency, including coverage, and
+  identify/lock/clean up the exact browser-test server process.
+
+### Operations
+
+Existing SQLite deployments must apply the new `event_publications` migration before
+using durable NATS publication. Custom stores opt in through the additive durable
+publication APIs; the default command-bus mode remains unchanged. Committed NATS
+writes succeed when durably queued even if the immediate broker call fails. Proxy
+users share the socket peer's rate-limit bucket; enforce per-client limits at the edge.
+Deployment audit policy remains pending owner approval.
+
+All fourteen reusable packages move together at 0.9.1; publication status is tracked
+in [Published Packages](docs/packages.md).
+
 ## 0.9.0 — 2026-10-31
 
 Published to crates.io. `arc-stack` and `arc-ffi` are published for the first time.

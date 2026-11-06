@@ -1,7 +1,7 @@
 use crate::domain::user::aggregate::UserAggregate;
 use crate::domain::user::commands::UserCommand;
 use crate::helpers::audit_context;
-use crate::helpers::csrf::{get_csrf_token, validate_and_regenerate_csrf_token};
+use crate::helpers::csrf::{get_csrf_token, validate_csrf_token};
 use crate::helpers::general::gravatar_url;
 use crate::helpers::session::{get_session_user, set_session_user, SessionUser};
 use crate::helpers::template::load_template;
@@ -111,7 +111,6 @@ pub struct UserForm {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PasswordForm {
     csrf_token: String,
-    current_email: String,
     old_password: String,
     new_password: String,
 }
@@ -139,7 +138,8 @@ pub async fn profile_post(
     command_bus: web::Data<CommandBus<UserAggregate>>,
     read_model_store: web::Data<dyn ReadModelStore>,
 ) -> impl Responder {
-    if !validate_and_regenerate_csrf_token(&session, &form.csrf_token) {
+    // Keep the token valid for both forms and validation retries on this page.
+    if !validate_csrf_token(&session, &form.csrf_token) {
         return HttpResponse::Forbidden()
             .json(serde_json::json!({"errors": {"csrf": "Invalid request. Please refresh and try again."}}));
     }
@@ -221,7 +221,8 @@ pub async fn profile_password_post(
     command_bus: web::Data<CommandBus<UserAggregate>>,
     read_model_store: web::Data<dyn ReadModelStore>,
 ) -> impl Responder {
-    if !validate_and_regenerate_csrf_token(&session, &form.csrf_token) {
+    // Keep the token valid for both forms and validation retries on this page.
+    if !validate_csrf_token(&session, &form.csrf_token) {
         return HttpResponse::Forbidden()
             .json(serde_json::json!({"errors": {"csrf": "Invalid request. Please refresh and try again."}}));
     }
@@ -234,14 +235,11 @@ pub async fn profile_password_post(
             ),
         };
 
-    let (validation, _agg_id) = validate_user_credentials_es(
-        read_model_store.as_ref(),
-        &form.current_email,
-        &form.old_password,
-    )
-    .await;
+    let (validation, agg_id) =
+        validate_user_credentials_es(read_model_store.as_ref(), &user.email, &form.old_password)
+            .await;
 
-    if validation != UserValidationResult::Valid {
+    if validation != UserValidationResult::Valid || agg_id.as_deref() != Some(user.id.as_str()) {
         return HttpResponse::BadRequest()
             .json(serde_json::json!({"errors": {"server_error": "Invalid credentials"}}));
     }
@@ -504,5 +502,186 @@ mod tests {
             validation,
             crate::services::user_service::UserValidationResult::Valid
         );
+    }
+    #[serial]
+    #[actix_web::test]
+    async fn profile_forms_reuse_csrf_and_password_confirmation_is_session_bound() {
+        let _guard = InMemoryTestGuard;
+        let stack = build_stack_with_default_user().await;
+        crate::services::user_service::create_user(
+            &stack.command_bus,
+            stack.read_model_store.as_ref(),
+            arc_core::command_bus::CommandContext::system(),
+            "Other".into(),
+            "other@example.com".into(),
+            "other-password",
+        )
+        .await
+        .unwrap();
+        let secret_key = Key::from(env::var("SECRET_KEY").unwrap().as_bytes());
+        let app = build_app!(stack.command_bus, stack.read_model_store, secret_key);
+        let mut cookie = login!(app, "jekyll@example.com", "password");
+        let resp = test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri("/admin/profile")
+                .cookie(cookie.clone())
+                .to_request(),
+        )
+        .await;
+        if let Some(value) = resp.headers().get("set-cookie") {
+            cookie = Cookie::parse_encoded(value.to_str().unwrap())
+                .unwrap()
+                .into_owned();
+        }
+        let body = test::read_body(resp).await;
+        let token = extract_csrf_token(std::str::from_utf8(&body).unwrap());
+
+        // Model a browser: retain each response's newest session cookie. The
+        // same page's two forms must survive validation failures and updates.
+        for (csrf, name, email, expected) in [
+            (
+                "forged",
+                "Jekyll",
+                "jekyll@example.com",
+                http::StatusCode::FORBIDDEN,
+            ),
+            (token.as_str(), "", "invalid", http::StatusCode::BAD_REQUEST),
+            (
+                token.as_str(),
+                "Jekyll Updated",
+                "updated@example.com",
+                http::StatusCode::OK,
+            ),
+            (
+                token.as_str(),
+                "Jekyll Again",
+                "updated@example.com",
+                http::StatusCode::OK,
+            ),
+        ] {
+            let resp = test::call_service(
+                &app,
+                test::TestRequest::post()
+                    .uri("/admin/profile")
+                    .cookie(cookie.clone())
+                    .set_form([("csrf_token", csrf), ("name", name), ("email", email)])
+                    .to_request(),
+            )
+            .await;
+            assert_eq!(resp.status(), expected);
+            if let Some(value) = resp.headers().get("set-cookie") {
+                cookie = Cookie::parse_encoded(value.to_str().unwrap())
+                    .unwrap()
+                    .into_owned();
+            }
+        }
+        // Another account's valid password must never authorize this session.
+        // Then the old page's stale email must not block the real password.
+        for (email, password, expected) in [
+            (
+                "other@example.com",
+                "other-password",
+                http::StatusCode::BAD_REQUEST,
+            ),
+            ("jekyll@example.com", "password", http::StatusCode::OK),
+        ] {
+            let resp = test::call_service(
+                &app,
+                test::TestRequest::post()
+                    .uri("/admin/profile-password")
+                    .cookie(cookie.clone())
+                    .set_form([
+                        ("csrf_token", token.as_str()),
+                        ("current_email", email),
+                        ("old_password", password),
+                        ("new_password", "changed-password"),
+                    ])
+                    .to_request(),
+            )
+            .await;
+            assert_eq!(resp.status(), expected);
+            if let Some(value) = resp.headers().get("set-cookie") {
+                cookie = Cookie::parse_encoded(value.to_str().unwrap())
+                    .unwrap()
+                    .into_owned();
+            }
+        }
+        let (result, _) = validate_user_credentials_es(
+            stack.read_model_store.as_ref(),
+            "updated@example.com",
+            "changed-password",
+        )
+        .await;
+        assert_eq!(result, UserValidationResult::Valid);
+        let (result, _) = validate_user_credentials_es(
+            stack.read_model_store.as_ref(),
+            "other@example.com",
+            "other-password",
+        )
+        .await;
+        assert_eq!(result, UserValidationResult::Valid);
+    }
+    #[serial]
+    #[actix_web::test]
+    async fn forwarding_headers_cannot_bypass_html_or_api_login_limits() {
+        let _guard = InMemoryTestGuard;
+        let stack = build_stack_with_default_user().await;
+        let sessions: web::Data<dyn arc_core::session::SessionStore> = web::Data::from(
+            std::sync::Arc::new(arc_core::session::InMemorySessionStore::new())
+                as std::sync::Arc<dyn arc_core::session::SessionStore>,
+        );
+        let app = test::init_service(
+            App::new()
+                .app_data(stack.read_model_store.clone())
+                .app_data(sessions)
+                .app_data(web::Data::new(
+                    crate::helpers::rate_limit::LoginRateLimiter(
+                        crate::helpers::rate_limit::RateLimiter::new(
+                            1,
+                            std::time::Duration::from_secs(60),
+                        ),
+                    ),
+                ))
+                .wrap(SessionMiddleware::new(
+                    CookieSessionStore::default(),
+                    Key::generate(),
+                ))
+                .service(auth_controller::signin_post)
+                .service(crate::http::controllers::api_controller::login),
+        )
+        .await;
+        for index in 0..2 {
+            let req = test::TestRequest::post()
+                .uri("/signin")
+                .peer_addr(format!("192.0.2.1:{}", 1000 + index).parse().unwrap())
+                .insert_header(("X-Forwarded-For", format!("198.51.100.{index}")))
+                .insert_header(("Forwarded", format!("for=198.51.100.{index}")))
+                .set_form([
+                    ("csrf_token", "bad"),
+                    ("email", "jekyll@example.com"),
+                    ("password", "bad"),
+                ])
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), http::StatusCode::SEE_OTHER);
+            assert_eq!(resp.headers().contains_key("Retry-After"), index == 1);
+            let req = test::TestRequest::post()
+                .uri("/login")
+                .peer_addr(format!("192.0.2.1:{}", 2000 + index).parse().unwrap())
+                .insert_header(("X-Forwarded-For", format!("198.51.100.{index}")))
+                .insert_header(("Forwarded", format!("for=198.51.100.{index}")))
+                .set_json(serde_json::json!({"email": "jekyll@example.com", "password": "bad"}))
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(
+                resp.status(),
+                if index == 0 {
+                    http::StatusCode::UNAUTHORIZED
+                } else {
+                    http::StatusCode::TOO_MANY_REQUESTS
+                }
+            );
+        }
     }
 }

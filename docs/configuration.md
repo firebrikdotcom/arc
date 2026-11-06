@@ -42,6 +42,14 @@ APP_PORT=8081
 
 Restart with `make dev`.
 
+`ARC_INSTANCE_ID` optionally sets a non-secret `X-Arc-Instance-Id` response header for process
+identification; the browser-test launcher supplies a fresh value and verifies it on health checks.
+Invalid header values fail startup. Do not use this value as an authentication credential.
+
+Request and login throttles use the socket peer IP, ignoring client-supplied `Forwarded` and
+`X-Forwarded-For` headers. Behind a reverse proxy, clients share that proxy's Arc rate-limit bucket;
+configure per-client limits at the trusted edge if needed.
+
 ## Change the bind address
 
 For local access from other devices:

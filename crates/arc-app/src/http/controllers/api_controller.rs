@@ -83,11 +83,7 @@ pub async fn login(
     read_model_store: web::Data<dyn ReadModelStore>,
     session_store: web::Data<dyn SessionStore>,
 ) -> impl Responder {
-    let ip = http_req
-        .connection_info()
-        .realip_remote_addr()
-        .unwrap_or("unknown")
-        .to_string();
+    let ip = crate::helpers::rate_limit::client_ip(&http_req);
     let key = format!("api_login:{}", ip);
 
     if let Err(retry_after) = limiter.check(key.clone()) {
@@ -304,14 +300,15 @@ mod tests {
     /// `UserProjector` to the in-process bus so writes flow into `users_view`
     /// the same way they do at runtime.
     async fn build_setup(
-        event_store: Box<dyn EventStore>,
+        event_store: Box<SqliteEventStore>,
     ) -> (
         web::Data<CommandBus<UserAggregate>>,
         web::Data<dyn ReadModelStore>,
     ) {
         let read_model_store: Arc<dyn ReadModelStore> = Arc::new(InMemoryReadModelStore::new());
 
-        let mut engine = ProjectionEngine::new(Box::new(InMemoryEventStoreShim));
+        // Authoritative projectors must read the same persisted streams as writes.
+        let mut engine = ProjectionEngine::new(Box::new(event_store.as_ref().clone()));
         engine.register_projector(
             Box::new(UserProjector::new()),
             read_model_store.clone(),
@@ -329,44 +326,6 @@ mod tests {
             web::Data::new(command_bus),
             web::Data::from(read_model_store),
         )
-    }
-
-    /// Trivial event store shim used only to satisfy `ProjectionEngine::new`.
-    /// Tests don't exercise rebuild_all, so a no-op is enough.
-    struct InMemoryEventStoreShim;
-
-    #[async_trait::async_trait]
-    impl EventStore for InMemoryEventStoreShim {
-        async fn append(
-            &self,
-            _: &str,
-            _: arc_core::event_store::VersionCheck,
-            _: Vec<arc_core::event::Event>,
-        ) -> arc_core::event_store::EventStoreResult<()> {
-            Ok(())
-        }
-        async fn load(
-            &self,
-            _: &str,
-        ) -> arc_core::event_store::EventStoreResult<Vec<arc_core::event::Event>> {
-            Ok(vec![])
-        }
-        async fn load_from(
-            &self,
-            _: &str,
-            _: i64,
-        ) -> arc_core::event_store::EventStoreResult<Vec<arc_core::event::Event>> {
-            Ok(vec![])
-        }
-        async fn stream_all(
-            &self,
-            _: i64,
-        ) -> arc_core::event_store::EventStoreResult<Vec<arc_core::event::Event>> {
-            Ok(vec![])
-        }
-        async fn get_version(&self, _: &str) -> arc_core::event_store::EventStoreResult<i64> {
-            Ok(0)
-        }
     }
 
     fn logger_data() -> web::Data<dyn AccessLogger> {

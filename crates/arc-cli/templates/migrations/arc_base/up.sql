@@ -44,3 +44,7 @@ CREATE TABLE jwt_sessions (
 
 CREATE INDEX idx_jwt_sessions_actor_id ON jwt_sessions(actor_id);
 CREATE INDEX idx_jwt_sessions_expires_at ON jwt_sessions(expires_at_us);
+
+CREATE TABLE event_publications (
+    event_id TEXT NOT NULL PRIMARY KEY REFERENCES events(event_id)
+);

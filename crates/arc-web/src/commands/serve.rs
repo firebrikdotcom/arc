@@ -8,7 +8,7 @@ use actix::prelude::*;
 use actix_session::storage::CookieSessionStore;
 use actix_session::{config::PersistentSession, SessionMiddleware};
 use actix_web::cookie::{time::Duration, Key, SameSite};
-use actix_web::middleware::{Compress, NormalizePath};
+use actix_web::middleware::{Compress, DefaultHeaders, NormalizePath};
 use actix_web::web::ServiceConfig;
 use actix_web::{web, App, HttpServer};
 use std::env;
@@ -37,6 +37,17 @@ type AppDataFn = dyn Fn(&mut ServiceConfig) + Send + Sync + 'static;
 /// Actix can later satisfy handlers requesting that exact bus.
 pub(crate) struct BuiltAggregateRuntime {
     configure: Arc<AppDataFn>,
+    publication_relay: Option<PublicationRelay>,
+}
+
+/// The relay lives exactly as long as its aggregate runtime. Pending entries
+/// remain durable if shutdown interrupts a publish before its acknowledgement.
+struct PublicationRelay(tokio::task::JoinHandle<()>);
+
+impl Drop for PublicationRelay {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 impl BuiltAggregateRuntime {
@@ -50,6 +61,7 @@ impl BuiltAggregateRuntime {
         let projection_engine_data = web::Data::from(projection_engine);
 
         Self {
+            publication_relay: None,
             configure: Arc::new(move |cfg| {
                 cfg.app_data(command_bus_data.clone())
                     .app_data(read_model_store_data.clone())
@@ -82,7 +94,7 @@ pub(crate) async fn build_aggregate_runtime<A: Aggregate + 'static>(
     let projection_engine = Arc::new(projection_engine);
 
     let event_bus_mode = event_bus_mode();
-    let mut event_bus = build_event_bus(&event_bus_mode).await;
+    let mut event_bus = build_event_bus(&event_bus_mode).await?;
     if event_bus_mode == EventBusMode::InProcess {
         event_bus
             .subscribe(Box::new(ProjectionEngineHandler::new(
@@ -116,12 +128,53 @@ pub(crate) async fn build_aggregate_runtime<A: Aggregate + 'static>(
         CommandBus::<A>::new(stores.command_event_store, event_bus),
         snapshot_policy,
     );
+    let command_bus = if event_bus_mode == EventBusMode::Nats {
+        command_bus.with_durable_publication().map_err(|error| {
+            io::Error::other(format!("durable event publication is unavailable: {error}"))
+        })?
+    } else {
+        command_bus
+    };
+    let command_bus = Arc::new(command_bus);
+    let mut runtime =
+        BuiltAggregateRuntime::new(command_bus.clone(), read_model_store, projection_engine);
+    if event_bus_mode == EventBusMode::Nats {
+        runtime.publication_relay = Some(start_publication_relay(command_bus));
+    }
+    Ok(runtime)
+}
 
-    Ok(BuiltAggregateRuntime::new(
-        Arc::new(command_bus),
-        read_model_store,
-        projection_engine,
-    ))
+fn start_publication_relay<A: Aggregate + 'static>(
+    command_bus: Arc<CommandBus<A>>,
+) -> PublicationRelay {
+    PublicationRelay(tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            // The first tick is immediate, recovering entries from a previous
+            // process even if no new command arrives after restart.
+            interval.tick().await;
+            let outcome = tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                arc_core::publication::relay_pending_publications(
+                    command_bus.event_store(),
+                    command_bus.event_bus(),
+                    A::aggregate_type(),
+                    100,
+                ),
+            )
+            .await;
+            match outcome {
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => warn!(aggregate_type = A::aggregate_type(), error = ?error,
+                    "Event publication remains queued for retry"),
+                Err(_) => warn!(
+                    aggregate_type = A::aggregate_type(),
+                    "Event publication timed out; pending entries will be retried"
+                ),
+            }
+        }
+    }))
 }
 
 /// Reject a caller-supplied stack unless `EVENT_BUS` selects the in-process bus.
@@ -151,6 +204,19 @@ pub(crate) async fn run(
     ui_registry: Option<Arc<UiRegistry>>,
 ) -> io::Result<()> {
     let security_headers = crate::http::middlewares::security_headers::SecurityHeaders::from_env()?;
+    // A non-secret process marker lets test/operations clients prove they
+    // reached the instance they launched, rather than an old listener.
+    let instance_id = env::var("ARC_INSTANCE_ID")
+        .ok()
+        .map(|value| {
+            actix_web::http::header::HeaderValue::from_str(&value).map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("invalid ARC_INSTANCE_ID response header: {error}"),
+                )
+            })
+        })
+        .transpose()?;
     crate::check_database_health();
 
     let secret_key = Key::from(
@@ -234,6 +300,10 @@ pub(crate) async fn run(
     let session_store_data = web::Data::from(session_store);
 
     HttpServer::new(move || {
+        let response_defaults = match &instance_id {
+            Some(value) => DefaultHeaders::new().add(("X-Arc-Instance-Id", value.clone())),
+            None => DefaultHeaders::new(),
+        };
         let mut session_middleware =
             SessionMiddleware::builder(CookieSessionStore::default(), secret_key.clone())
                 .cookie_name("arc_session".to_string())
@@ -260,6 +330,7 @@ pub(crate) async fn run(
         let ui_registry = ui_registry.clone();
 
         App::new()
+            .wrap(response_defaults)
             .wrap(tracing_actix_web::TracingLogger::default())
             .wrap(GlobalRateLimit)
             .wrap(Compress::default())
@@ -319,22 +390,20 @@ fn event_bus_mode() -> EventBusMode {
     }
 }
 
-async fn build_event_bus(mode: &EventBusMode) -> Box<dyn EventBus> {
+async fn build_event_bus(mode: &EventBusMode) -> io::Result<Box<dyn EventBus>> {
     match mode {
-        EventBusMode::InProcess => Box::new(InProcessEventBus::new()),
+        EventBusMode::InProcess => Ok(Box::new(InProcessEventBus::new())),
         EventBusMode::Nats => build_nats_event_bus().await,
     }
 }
 
 #[cfg(feature = "nats")]
-async fn build_nats_event_bus() -> Box<dyn EventBus> {
+async fn build_nats_event_bus() -> io::Result<Box<dyn EventBus>> {
     let nats_url = env::var("NATS_URL").unwrap_or_else(|_| "nats://127.0.0.1:4222".to_string());
     let nats_stream = env::var("NATS_STREAM").unwrap_or_else(|_| "EVENTS".to_string());
-    let async_bus = Arc::new(
-        NatsEventBus::new(&nats_url, &nats_stream)
-            .await
-            .expect("Failed to initialize NATS event bus"),
-    );
+    let async_bus = Arc::new(NatsEventBus::new(&nats_url, &nats_stream).await.map_err(
+        |error| io::Error::other(format!("failed to initialize NATS event bus: {error}")),
+    )?);
 
     info!(
         nats_url = nats_url,
@@ -342,13 +411,15 @@ async fn build_nats_event_bus() -> Box<dyn EventBus> {
         "Using NATS JetStream event bus"
     );
 
-    Box::new(TwoLaneEventBus::with_async_bus(async_bus))
+    Ok(Box::new(TwoLaneEventBus::with_async_bus(async_bus)))
 }
 
 #[cfg(not(feature = "nats"))]
-async fn build_nats_event_bus() -> Box<dyn EventBus> {
-    warn!("EVENT_BUS=nats requested without the nats cargo feature; falling back to inprocess");
-    Box::new(InProcessEventBus::new())
+async fn build_nats_event_bus() -> io::Result<Box<dyn EventBus>> {
+    Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "EVENT_BUS=nats requires building with the nats cargo feature",
+    ))
 }
 
 #[cfg(test)]
@@ -419,6 +490,136 @@ mod tests {
 
     aggregate!(ProductAggregate, CreateProduct, "Product", "ProductCreated");
     aggregate!(OrderAggregate, PlaceOrder, "Order", "OrderPlaced");
+
+    #[derive(Clone)]
+    struct RecoveryStore {
+        inner: InMemoryEventStore,
+        pending: Arc<tokio::sync::Mutex<Vec<Event>>>,
+    }
+
+    #[async_trait]
+    impl EventStore for RecoveryStore {
+        async fn append(
+            &self,
+            id: &str,
+            version: arc_core::event_store::VersionCheck,
+            events: Vec<Event>,
+        ) -> arc_core::event_store::EventStoreResult<()> {
+            self.inner.append(id, version, events).await
+        }
+        async fn load(&self, id: &str) -> arc_core::event_store::EventStoreResult<Vec<Event>> {
+            self.inner.load(id).await
+        }
+        async fn load_from(
+            &self,
+            id: &str,
+            from: i64,
+        ) -> arc_core::event_store::EventStoreResult<Vec<Event>> {
+            self.inner.load_from(id, from).await
+        }
+        async fn stream_all(
+            &self,
+            from: i64,
+        ) -> arc_core::event_store::EventStoreResult<Vec<Event>> {
+            self.inner.stream_all(from).await
+        }
+        async fn get_version(&self, id: &str) -> arc_core::event_store::EventStoreResult<i64> {
+            self.inner.get_version(id).await
+        }
+        async fn pending_publications(
+            &self,
+            aggregate_type: &str,
+            limit: usize,
+        ) -> arc_core::event_store::EventStoreResult<Vec<Event>> {
+            Ok(self
+                .pending
+                .lock()
+                .await
+                .iter()
+                .filter(|e| e.aggregate_type == aggregate_type)
+                .take(limit)
+                .cloned()
+                .collect())
+        }
+        async fn acknowledge_publication(
+            &self,
+            id: uuid::Uuid,
+        ) -> arc_core::event_store::EventStoreResult<()> {
+            self.pending
+                .lock()
+                .await
+                .retain(|event| event.event_id != id);
+            Ok(())
+        }
+    }
+
+    struct RecoveringBus {
+        attempts: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl EventBus for RecoveringBus {
+        async fn publish(&self, _: Vec<Event>) -> arc_core::event_bus::EventBusResult<()> {
+            if self
+                .attempts
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                == 0
+            {
+                Err(arc_core::event_bus::EventBusError::other(
+                    "broker unavailable",
+                ))
+            } else {
+                Ok(())
+            }
+        }
+        async fn subscribe(
+            &mut self,
+            _: Box<dyn arc_core::event_bus::EventHandler>,
+        ) -> arc_core::event_bus::EventBusResult<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn runtime_relay_recovers_without_new_commands_and_stops_on_drop() {
+        let event = Event::new(NewEvent {
+            aggregate_type: "Product",
+            aggregate_id: "recovery",
+            sequence: 1,
+            event_type: "ProductCreated",
+            payload: json!({}),
+        });
+        let store = RecoveryStore {
+            inner: InMemoryEventStore::new(),
+            pending: Arc::new(tokio::sync::Mutex::new(vec![event])),
+        };
+        let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let command_bus = Arc::new(CommandBus::<ProductAggregate>::new(
+            Box::new(store.clone()),
+            Box::new(RecoveringBus {
+                attempts: attempts.clone(),
+            }),
+        ));
+        let weak_bus = Arc::downgrade(&command_bus);
+        let relay = start_publication_relay(command_bus.clone());
+        drop(command_bus);
+        tokio::time::timeout(std::time::Duration::from_secs(4), async {
+            while !store.pending.lock().await.is_empty() {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("runtime must retry queued work without a new dispatch");
+        assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
+        drop(relay);
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while weak_bus.upgrade().is_some() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("dropping runtime must release its relay task");
+    }
 
     struct RecordingProjector {
         event_type: &'static str,

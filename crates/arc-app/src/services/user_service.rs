@@ -84,6 +84,7 @@ async fn find_user_by_email(
     let mut hits = store
         .find_by(USERS_VIEW, "email", &json!(user_email))
         .await?;
+    hits.retain(|row| row.get("_arc_deleted").and_then(serde_json::Value::as_bool) != Some(true));
     Ok(hits.pop())
 }
 

@@ -25,7 +25,13 @@ instrumentation is reported as not run.
 ```bash
 make check
 make test
+npm run test:verification
 ```
+
+The verification-script regressions exercise every required CI dependency's failure status and
+real child-process startup, occupied ports, readiness deadlines, and instance identity. The CI
+summary evaluates all declared dependency results, including coverage; skipped and cancelled jobs
+fail the summary just like failed jobs.
 
 ## Test an endpoint
 

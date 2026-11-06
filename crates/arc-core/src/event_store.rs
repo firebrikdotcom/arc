@@ -160,6 +160,41 @@ pub fn validate_audit_batch(aggregate_id: &str, events: &[Event]) -> EventStoreR
 /// in depth). The `CommandBus` also validates upstream — both layers run.
 #[async_trait]
 pub trait EventStore: Send + Sync {
+    /// Whether appends can atomically queue durable event publication.
+    fn supports_durable_publication(&self) -> bool {
+        false
+    }
+
+    /// Append events and their publication markers in one transaction.
+    /// Optional: opting in against an unsupported custom store fails closed.
+    async fn append_to_with_publication(
+        &self,
+        aggregate_type: &str,
+        aggregate_id: &str,
+        version_check: VersionCheck,
+        events: Vec<Event>,
+    ) -> EventStoreResult<()> {
+        let _ = (aggregate_type, aggregate_id, version_check, events);
+        Err(EventStoreError::Unsupported)
+    }
+
+    /// Load at most `limit` queued events for one aggregate type, in append order.
+    /// Values must come from the authoritative event log, including integrity checks.
+    async fn pending_publications(
+        &self,
+        aggregate_type: &str,
+        limit: usize,
+    ) -> EventStoreResult<Vec<Event>> {
+        let _ = (aggregate_type, limit);
+        Err(EventStoreError::Unsupported)
+    }
+
+    /// Remove a publication marker only after the carrier acknowledges delivery.
+    async fn acknowledge_publication(&self, event_id: uuid::Uuid) -> EventStoreResult<()> {
+        let _ = event_id;
+        Err(EventStoreError::Unsupported)
+    }
+
     /// Append events to the store for a specific aggregate.
     ///
     /// Implementations must call `validate_audit_batch(aggregate_id, &events)?`

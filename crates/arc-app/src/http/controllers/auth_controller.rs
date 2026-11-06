@@ -72,11 +72,7 @@ pub async fn signin_post(
     limiter: web::Data<LoginRateLimiter>,
     read_model_store: web::Data<dyn ReadModelStore>,
 ) -> impl Responder {
-    let ip = req
-        .connection_info()
-        .realip_remote_addr()
-        .unwrap_or("unknown")
-        .to_string();
+    let ip = crate::helpers::rate_limit::client_ip(&req);
     let key = format!("login:{}", ip);
 
     if let Err(retry_after) = limiter.check(key.clone()) {

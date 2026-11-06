@@ -25,6 +25,9 @@ impl SessionUser {
     /// Build from a `users_view` row, or `None` if the row is missing the
     /// fields the cookie session needs.
     pub fn from_row(row: &serde_json::Value) -> Option<Self> {
+        if row.get("_arc_deleted").and_then(serde_json::Value::as_bool) == Some(true) {
+            return None;
+        }
         Some(Self {
             id: row.get("id")?.as_str()?.to_string(),
             name: row.get("name")?.as_str()?.to_string(),

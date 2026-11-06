@@ -1,5 +1,6 @@
 use super::events::{CREATED, DELETED, RENAMED};
 use arc_core::event::Event;
+use arc_core::event_store::EventStore;
 use arc_core::projection::{ProjectionError, ProjectionResult, Projector};
 use arc_core::read_model_store::{ReadModelStore, Upsert};
 use async_trait::async_trait;
@@ -52,12 +53,44 @@ impl Projector for {{Type}}Projector {
                     .map_err(|error| projection_error(self, event, error.to_string()))?;
             }
             DELETED => store
-                .delete({{CONSTANT}}_VIEW, &event.aggregate_id)
+                .upsert(Upsert::new({{CONSTANT}}_VIEW, &event.aggregate_id,
+                    json!({"id": event.aggregate_id, "version": event.sequence, "_arc_deleted": true})))
                 .await
                 .map_err(|error| projection_error(self, event, error.to_string()))?,
             _ => {}
         }
         Ok(())
+    }
+
+    async fn apply_authoritative(
+        &self,
+        event: &Event,
+        store: &dyn ReadModelStore,
+        events: &dyn EventStore,
+    ) -> ProjectionResult<()> {
+        // Reconcile the complete current stream, not just the delivered
+        // delta: routing and concurrent commands can reorder delivery.
+        let stream = events.load_stream(&event.aggregate_type, &event.aggregate_id)
+            .await.map_err(|error| projection_error(self, event, error.to_string()))?;
+        let mut row = None;
+        for persisted in &stream {
+            match persisted.event_type.as_str() {
+                CREATED | RENAMED => row = Some(json!({
+                    "id": persisted.aggregate_id,
+                    "name": payload_name(persisted)?,
+                    "version": persisted.sequence,
+                })),
+                DELETED => row = Some(json!({
+                    "id": persisted.aggregate_id,
+                    "version": persisted.sequence,
+                    "_arc_deleted": true,
+                })),
+                _ => {}
+            }
+        }
+        let row = row.ok_or_else(|| ProjectionError::other("resource stream has no projected state"))?;
+        store.upsert(Upsert::new({{CONSTANT}}_VIEW, &event.aggregate_id, row))
+            .await.map_err(|error| projection_error(self, event, error.to_string()))
     }
 }
 

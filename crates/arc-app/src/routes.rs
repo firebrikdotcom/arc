@@ -16,7 +16,20 @@ use actix_web::{get, web, Error, HttpRequest, HttpResponse, Responder};
 /// requests and tiered Cache-Control headers (immutable for hashed assets).
 #[get("/public/{filename:.*}")]
 pub async fn static_file(req: HttpRequest) -> Result<HttpResponse, Error> {
-    let path: std::path::PathBuf = req.match_info().query("filename").parse().unwrap();
+    let path = std::path::Path::new(req.match_info().query("filename"));
+    // Reject absolute paths and traversal before joining; canonical containment
+    // also prevents a symlink inside dist from exposing a file outside it.
+    if path
+        .components()
+        .any(|part| !matches!(part, std::path::Component::Normal(_)))
+    {
+        return Err(actix_web::error::ErrorNotFound("Asset not found"));
+    }
+    let root = std::path::Path::new("./dist").canonicalize()?;
+    let asset = root.join(path).canonicalize()?;
+    if !asset.starts_with(&root) || !asset.is_file() {
+        return Err(actix_web::error::ErrorNotFound("Asset not found"));
+    }
     let filename = path.to_string_lossy();
 
     // Check if file has a hash in the name (e.g., script-1MSs88XQ.js)
@@ -24,7 +37,7 @@ pub async fn static_file(req: HttpRequest) -> Result<HttpResponse, Error> {
     let is_hashed =
         filename.contains('-') && (filename.ends_with(".js") || filename.ends_with(".css"));
 
-    let file = fs::NamedFile::open(std::path::Path::new("./dist").join(path.clone()))?;
+    let file = fs::NamedFile::open(asset)?;
 
     // Generate ETag from file metadata
     let metadata = file.file().metadata()?;
@@ -211,5 +224,47 @@ mod tests {
             .to_request();
         let resp = test::call_service(&app, req).await;
         assert_eq!(resp.status(), http::StatusCode::NOT_FOUND);
+    }
+    #[actix_web::test]
+    async fn static_assets_reject_traversal_and_symlink_escape_and_keep_cache_headers() {
+        let name = format!("security-{}", uuid::Uuid::new_v4());
+        let dir = std::path::Path::new("dist").join(&name);
+        fs::create_dir_all(dir.join("nested")).unwrap();
+        fs::write(dir.join("nested/app-abcdef.js"), "asset").unwrap();
+        let outside = std::env::temp_dir().join(&name);
+        fs::write(&outside, "secret").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, dir.join("escape.js")).unwrap();
+        let app = test::init_service(App::new().service(static_file)).await;
+        for uri in [
+            format!("/public/{name}/../{name}/nested/app-abcdef.js"),
+            format!("/public/{name}/%2e%2e/{name}/nested/app-abcdef.js"),
+            "/public//etc/passwd".to_string(),
+            format!("/public/{name}/escape.js"),
+        ] {
+            let resp =
+                test::call_service(&app, test::TestRequest::get().uri(&uri).to_request()).await;
+            assert_eq!(resp.status(), http::StatusCode::NOT_FOUND, "{uri}");
+        }
+        let uri = format!("/public/{name}/nested/app-abcdef.js");
+        let resp = test::call_service(&app, test::TestRequest::get().uri(&uri).to_request()).await;
+        assert_eq!(resp.status(), http::StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(CACHE_CONTROL).unwrap(),
+            "public, max-age=31536000, immutable"
+        );
+        let etag = resp.headers().get(ETAG).unwrap().clone();
+        assert_eq!(test::read_body(resp).await, "asset");
+        let resp = test::call_service(
+            &app,
+            test::TestRequest::get()
+                .uri(&uri)
+                .insert_header((IF_NONE_MATCH, etag))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(resp.status(), http::StatusCode::NOT_MODIFIED);
+        fs::remove_dir_all(dir).unwrap();
+        fs::remove_file(outside).unwrap();
     }
 }

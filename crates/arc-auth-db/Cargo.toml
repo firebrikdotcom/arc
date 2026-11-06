@@ -10,8 +10,8 @@ readme = "../../README.md"
 keywords = ["arc", "authentication", "database", "roles", "identity"]
 
 [dependencies]
-arc-auth-core = { path = "../arc-auth-core", version = "0.9.0" }
-arc-web = { path = "../arc-web", version = "0.9.0" }
+arc-auth-core = { path = "../arc-auth-core", version = "0.9.1" }
+arc-web = { path = "../arc-web", version = "0.9.1" }
 argon2.workspace = true
 async-trait.workspace = true
 diesel.workspace = true

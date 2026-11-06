@@ -13,6 +13,7 @@ endpoint (so it keeps working when Step 5 swaps SQLite for Postgres).
 | `tests/e2e/specs/ui-signin.spec.ts` | `/signin` HTML form: CSRF token extraction, cookie session, redirect to `/admin`, bad-password rejection, CSRF tampering |
 | `tests/e2e/specs/security-assets.spec.ts` | Security headers preserve Vite assets, caching/304, Turbo and Toastify |
 | `tests/e2e/specs/ui-signout.spec.ts` | `/signout` clears the session and `/admin` bounces to `/signin` |
+| `tests/e2e/specs/ui-profile-repeat-save.spec.ts` | Repeated profile saves, validation retry, password update and no logout prefetch while reusing the original page |
 
 ## Backend-agnostic audit verification
 
@@ -51,20 +52,28 @@ Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to use a system Chromium installation
 uses its downloaded browser. Video recording also requires Playwright’s FFmpeg
 (`npx playwright install ffmpeg`).
 
+Set `APP_PORT` when the default test port is occupied; both the browser base URL and launched
+server use that explicit override, and the launcher never stops an existing listener.
+
 The `e2e` target shells through to `playwright.config.ts`, which spawns the
 binary via `tests/e2e/global-setup.ts`. That setup script:
 
 1. Loads `.env.e2e` (deterministic secrets, port 18080, `DATABASE_URL=database/database-e2e.sqlite`)
-2. `cargo build --bin arc` (skipped if `E2E_SKIP_BUILD=1`)
-3. `npm run build` for Vite assets
-4. Deletes any stale `database/database-e2e.sqlite{,-shm,-wal}`
+2. Acquires `.e2e-run.lock/` and refuses an occupied test port before resetting the database or building
+3. Deletes stale `database/database-e2e.sqlite{,-shm,-wal}` and builds the binary/assets
+   (backend build skipped if `E2E_SKIP_BUILD=1`, assets if `E2E_SKIP_FRONTEND=1`)
+4. Creates a fresh `ARC_INSTANCE_ID` for this server process
 5. `arc migrate` then `arc seed` → `jekyll@example.com` / `password`
-6. Spawns `arc serve` and waits for both `GET /health` and `GET /__diag__/health`
+6. Spawns `arc serve`, checks child survival, and requires both health endpoints to return
+   the expected `X-Arc-Instance-Id` within the readiness deadline
 7. Records PID + port in `.e2e-state.json`
 
-`global-teardown.ts` SIGTERMs the PID, deletes the DB files, and removes
-the state file. If the test run dies mid-flight, run `make e2e` again — the
-fresh setup overwrites whatever was left behind.
+The cleanup returned by global setup retains the actual child-process handle, terminates only
+that child, and removes only its own database, state and lock. Serialized PIDs are diagnostic;
+teardown never uses one to signal a process. Concurrent runs fail before database mutation.
+If the runner is killed, confirm no E2E run or owned server is still active before manually
+removing an abandoned `.e2e-run.lock/` and retrying. Port and instance checks prevent silently
+testing a remaining listener. Failed startup terminates the new child and releases its lock.
 
 ## Adding a spec
 

@@ -1,5 +1,24 @@
 # Security test coverage
 
+## Unreleased reliability and security follow-up
+
+The reference app's static handler rejects traversal, absolute paths and symlinks outside `dist`
+while retaining asset caching. Password confirmation resolves the session user's account and
+checks its identity rather than trusting a submitted email. Login/global throttles key on socket
+peer IP, ignoring spoofed forwarding headers. Profile and password fetch forms validate a stable
+session CSRF token so retries and sequential saves work; authentication still rotates session state.
+Handler and middleware regressions cover these paths, including malicious CSRF and cross-account
+password attempts. The reference app also disables Turbo prefetch for its Sign out link, preventing
+hover after a toast close from clearing the session; browser coverage exercises repeated saves,
+validation retries and password changes on the original page.
+
+Distributed writes now have an atomic publication queue and automatic runtime retry; SQLite
+regressions cover reopen recovery, failed acknowledgements, aggregate scoping and transaction
+rollback. User projections reconstruct complete authoritative state and use hidden versioned
+deletion tombstones, with reordered/concurrent delivery and delayed registration replay coverage.
+These implementation checks do not close deployment audit policy or established WebSocket
+revocation decisions. Hosted CI and release validation remain separate from local checks.
+
 Original coverage verified 2026-09-13 in `security/threat-model-20260912`; browser-session
 regressions added 2026-09-14 in `security/session-invalidation-20260914`. This matrix supplements the
 [threat model](threat-model.md). Passing a test named **GAP** confirms a reproducible
@@ -13,7 +32,8 @@ weakness; it does not certify a mitigation or approve a release.
 | TM-01/04 store and middleware | `arc-auth-db::browser_tests::migration_upgrade_and_durable_invalidation`; `arc-auth-session::tests::cached_identity_cannot_authorize_without_a_validated_handle` | SQLite upgrade/idempotence, persisted handles across store instances, role/active/password invalidation, logout isolation and expiry; cached-only cookies and missing store wiring deny access. |
 | TM-07 projection | `crates/arc-app/tests/projection_security_http.rs`; `ProjectionEngine::process_external_delivery` | Real HTTP rejects missing/wrong credentials without mutation. Delivery now requires the exact event from bounded typed lookup in the authoritative store; absent or modified envelopes are rejected before projection. Tests cover a forged aggregate ID, payload, timestamp, and audit metadata with no mutation, then a valid persisted event and idempotent duplicate delivery. Stores without exact lookup support fail closed. |
 | TM-07 PostgreSQL event payloads | `arc-es-postgres` event schema and forward migration | Event payloads use `JSON` to preserve serialized numeric representations; read-model `JSONB` stays unchanged. The idempotent migration and legacy signed-row upgrade passed the PostgreSQL 16 suite (28/28), including integrity off/on, numeric round-trips, idempotency, tamper rejection/no mutation, and numeric command→publish→external projection. Its `search_path` guard targets the resolved `events` relation and skips redundant `ALTER TABLE` when the target column is already `JSON`; a two-schema test holds `ACCESS SHARE` with a 250 ms lock timeout to prove it avoids unnecessary exclusive locking. This is a migration-guard property, not a lock-free guarantee for the full initializer. `bash tests/bounded-reads/run.sh` exited 0 with PostgreSQL-enabled Rust tests, generated fixture 5/5, and browser workflow. Local evidence only; no external migration application is claimed. Historic signatures invalidated by prior normalization stay fail-closed and are never resealed. |
-| TM-08 delivery | `arc-core::command_bus::tests::publish_failure_preserves_event_for_explicit_recovery` | Unit fault injection proves append survives publish failure and explicit replay preserves event ID without another append. It is not automatic outbox recovery or crash durability. |
+| TM-08 legacy default mode | `arc-core::command_bus::tests::publish_failure_preserves_event_for_explicit_recovery` | Default non-durable command buses still preserve appended events for explicit recovery. This test describes that opt-out behavior, not the NATS runtime. |
+| TM-08 durable NATS mode | SQLite/Postgres durable-publication regressions; `arc-web::commands::serve::tests::runtime_relay_recovers_without_new_commands_and_stops_on_drop` | Atomic queue insertion/rollback, reopen, stable IDs after failed acknowledgement, aggregate scoping, automatic idle retry and shutdown ownership. Live Postgres requires the configured test URL; no exactly-once side-effect guarantee. |
 | TM-08/09 distributed routing | `crates/arc-app/tests/benthos_projection_routing.rs` | Existing real NATS → Redpanda Connect → Arc projection test passed with actual binaries, without prerequisite skips. Broker crash/restart recovery remains untested by this check. |
 | TM-11 WebSockets | `tests/security/browser.spec.mjs` | The current browser suite checks handshake origin and authenticated identity, rejects cached-only identity, verifies own-user room membership, and confirms user/room broadcasts stay isolated. The authorization tests assert the secure behavior directly; they are not expected-failure probes. Revocation after a socket has already upgraded remains a known limitation. See [WebSocket security](websocket-security.md). |
 | TM-13 access audit | `crates/arc-web/tests/security_http.rs::audit_http_failures_and_stalled_sink_gap` | Real TCP with controlled sink: PHI/PCI errors return 503 without payload; PII fails open; stalled PHI request stays pending until released. The 100ms observation is not a production timeout policy. |

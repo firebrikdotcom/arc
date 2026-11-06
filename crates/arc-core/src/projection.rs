@@ -243,6 +243,18 @@ pub trait Projector: Send + Sync {
     /// must produce the same result.
     async fn apply(&self, event: &Event, store: &dyn ReadModelStore) -> ProjectionResult<()>;
 
+    /// Apply with access to authoritative history. Projectors with partial event
+    /// payloads can reconcile full current state before one version-gated write,
+    /// avoiding lost fields under concurrent or reordered delivery.
+    async fn apply_authoritative(
+        &self,
+        event: &Event,
+        store: &dyn ReadModelStore,
+        _event_store: &dyn EventStore,
+    ) -> ProjectionResult<()> {
+        self.apply(event, store).await
+    }
+
     /// Initialize the read model schema (CREATE TABLE IF NOT EXISTS, etc.).
     ///
     /// Called once when the projector is first registered and before rebuilds.
@@ -278,6 +290,14 @@ pub trait Projection: Send + Sync {
 
     /// Handle a single event by applying it through the projector to the store.
     async fn handle(&self, event: &Event) -> ProjectionResult<()>;
+
+    async fn handle_authoritative(
+        &self,
+        event: &Event,
+        _event_store: &dyn EventStore,
+    ) -> ProjectionResult<()> {
+        self.handle(event).await
+    }
 
     /// Clear all read model state for this projection.
     async fn clear(&self) -> ProjectionResult<()>;
@@ -352,6 +372,16 @@ impl Projection for ProjectionUnit {
 
     async fn handle(&self, event: &Event) -> ProjectionResult<()> {
         self.projector.apply(event, self.store.as_ref()).await
+    }
+
+    async fn handle_authoritative(
+        &self,
+        event: &Event,
+        event_store: &dyn EventStore,
+    ) -> ProjectionResult<()> {
+        self.projector
+            .apply_authoritative(event, self.store.as_ref(), event_store)
+            .await
     }
 
     async fn clear(&self) -> ProjectionResult<()> {
@@ -436,14 +466,17 @@ impl ProjectionEngine {
                     projection.name()
                 );
 
-                projection.handle(event).await.map_err(|e| {
-                    ProjectionError::handle_failed(
-                        projection.name(),
-                        &event.event_type,
-                        event.event_id.to_string(),
-                        e.to_string(),
-                    )
-                })?;
+                projection
+                    .handle_authoritative(event, self.event_store.as_ref())
+                    .await
+                    .map_err(|e| {
+                        ProjectionError::handle_failed(
+                            projection.name(),
+                            &event.event_type,
+                            event.event_id.to_string(),
+                            e.to_string(),
+                        )
+                    })?;
             }
         }
         Ok(())

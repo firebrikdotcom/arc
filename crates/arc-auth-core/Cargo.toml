@@ -10,7 +10,7 @@ readme = "../../README.md"
 keywords = ["arc", "authentication", "authorization", "identity", "web"]
 
 [dependencies]
-arc-core = { path = "../arc-core", version = "0.9.0" }
+arc-core = { path = "../arc-core", version = "0.9.1" }
 async-trait.workspace = true
 serde.workspace = true
 thiserror.workspace = true

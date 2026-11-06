@@ -1,7 +1,7 @@
 # Arc Project Progress
 
-**Last updated:** 2026-10-31
-**Current development version:** 0.9.0
+**Last updated:** 2026-11-05
+**Current development version:** 0.9.1
 **Latest published version:** 0.9.0
 **Status:** v0.9.0, published to crates.io, is the Phase 2 release: WebSocket and
 projection security hardening (breaking; see [Upgrading](docs/upgrading.md)), the
@@ -27,6 +27,22 @@ observability, and developer experience.
 
 This is the canonical project-status and roadmap tracker. Current source code and accepted ADRs
 take precedence when a claim here becomes stale.
+
+## Security, delivery and verification follow-up — 0.9.1 candidate — 2026-11-06
+
+- Fixes cover static-path traversal, cross-account password confirmation, forwarding-header
+  rate-limit bypass, and repeated profile/password submissions with valid CSRF protection.
+- NATS mode queues publication atomically with event append and retries pending events at runtime;
+  SQLite migrations and generated migrations include the queue, and Postgres initializes it.
+- User and newly generated resource projectors reconcile complete authoritative streams; hidden,
+  versioned tombstones prevent delayed registration from restoring deleted records.
+- CI evaluates every required job, including coverage, and browser-test startup checks a fresh
+  process instance marker. Regression checks run through `make test` and the frontend CI job.
+- Local workspace/all-feature tests, Clippy, release build, live PostgreSQL 16 and
+  NATS/Redpanda routing checks passed. Browser checks passed 19/19; fresh minimal/UI
+  scaffolds passed compilation, tests, formatting, Clippy, HTTP and browser checks.
+  Independent role reviews found no unresolved material issue. Release preparation targets all fourteen 0.9.1 packages; publication and hosted
+  CI remain pending. Deployment audit policy approval is not claimed.
 
 ## Android scaffold (U-4, Q-17/Q-17a) — implementation verified; PR/CI pending — 2026-10-30
 

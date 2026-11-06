@@ -10,6 +10,7 @@
     "benthos:config": "node scripts/generate-benthos-config.mjs",
     "benthos:config:check": "node scripts/generate-benthos-config.mjs --check",
     "benthos:config:test": "node --test scripts/generate-benthos-config.test.mjs",
+    "test:verification": "node scripts/check-ci-summary.mjs && node --test scripts/check-e2e-startup.mjs",
     "dev": "vite dev",
     "docs:serve": "vite docs --port 3001",
     "docsify:serve": "vite docs --port 3001",

@@ -55,3 +55,5 @@ CREATE TABLE users_view (
 
 CREATE UNIQUE INDEX idx_users_view_email
     ON users_view(json_extract(data, '$.email'));
+
+CREATE TABLE IF NOT EXISTS event_publications (event_id TEXT NOT NULL PRIMARY KEY REFERENCES events(event_id));

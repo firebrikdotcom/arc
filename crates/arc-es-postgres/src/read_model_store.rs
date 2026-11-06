@@ -162,7 +162,7 @@ impl ReadModelStore for PostgresReadModelStore {
 
     async fn get(&self, table: &str, key: &str) -> ReadModelResult<Option<Row>> {
         check_ident("table name", table)?;
-        let row = sqlx::query(&format!("SELECT data FROM {table} WHERE id = $1 LIMIT 1"))
+        let row = sqlx::query(&format!("SELECT data FROM {table} WHERE data -> '_arc_deleted' IS DISTINCT FROM 'true'::jsonb AND id = $1 LIMIT 1"))
             .bind(key)
             .fetch_optional(&self.pool)
             .await
@@ -189,7 +189,7 @@ impl ReadModelStore for PostgresReadModelStore {
         let needle = find_by_text(value)?;
 
         let rows = sqlx::query(&format!(
-            "SELECT data FROM {table} WHERE data ->> $1 IS NOT DISTINCT FROM $2"
+            "SELECT data FROM {table} WHERE data -> '_arc_deleted' IS DISTINCT FROM 'true'::jsonb AND data ->> $1 IS NOT DISTINCT FROM $2"
         ))
         .bind(field)
         .bind(needle)
@@ -207,10 +207,12 @@ impl ReadModelStore for PostgresReadModelStore {
 
     async fn list(&self, table: &str) -> ReadModelResult<Vec<Row>> {
         check_ident("table name", table)?;
-        let rows = sqlx::query(&format!("SELECT data FROM {table}"))
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| ReadModelError::query_failed(e.to_string()))?;
+        let rows = sqlx::query(&format!(
+            "SELECT data FROM {table} WHERE data -> '_arc_deleted' IS DISTINCT FROM 'true'::jsonb"
+        ))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| ReadModelError::query_failed(e.to_string()))?;
 
         rows.iter()
             .map(|r| {
@@ -236,7 +238,7 @@ impl ReadModelStore for PostgresReadModelStore {
                 "COALESCE(data ->> 'name', '') COLLATE \"C\" DESC, id COLLATE \"C\" ASC"
             }
         };
-        let rows = sqlx::query(&format!("SELECT data FROM {table} WHERE strpos(translate(COALESCE(data ->> 'name', ''), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), $1) > 0 ORDER BY {order} LIMIT $2 OFFSET $3"))
+        let rows = sqlx::query(&format!("SELECT data FROM {table} WHERE data -> '_arc_deleted' IS DISTINCT FROM 'true'::jsonb AND strpos(translate(COALESCE(data ->> 'name', ''), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), $1) > 0 ORDER BY {order} LIMIT $2 OFFSET $3"))
             .bind(query.filter.to_ascii_lowercase()).bind(query.limit as i64 + 1).bind(query.offset as i64)
             .fetch_all(&self.pool).await.map_err(|e| ReadModelError::query_failed(e.to_string()))?;
         let rows = rows
@@ -326,6 +328,52 @@ mod tests {
 
     fn user_row(id: &str, name: &str, email: &str, version: i64) -> Row {
         json!({ "id": id, "name": name, "email": email, "version": version })
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn tombstones_are_hidden_before_pagination_and_reject_stale_rows() {
+        let Some(store) = live_store().await else {
+            return;
+        };
+        store
+            .upsert(Upsert::new(
+                "users_view",
+                "a",
+                json!({"id":"a","version":2,"_arc_deleted":true}),
+            ))
+            .await
+            .unwrap();
+        store
+            .upsert(Upsert::new(
+                "users_view",
+                "a",
+                json!({"id":"a","version":1,"name":"Resurrected","email":"old@example.test"}),
+            ))
+            .await
+            .unwrap();
+        store
+            .upsert(Upsert::new(
+                "users_view",
+                "b",
+                json!({"id":"b","version":1,"name":"Visible","deleted":true}),
+            ))
+            .await
+            .unwrap();
+        assert!(store.get("users_view", "a").await.unwrap().is_none());
+        assert!(store
+            .find_by("users_view", "email", &json!("old@example.test"))
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(store.list("users_view").await.unwrap().len(), 1);
+        let page = store
+            .collection("users_view", &CollectionQuery::new(1, 0).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(page.rows.len(), 1);
+        assert_eq!(page.rows[0]["id"], "b");
+        assert!(!page.has_next);
     }
 
     #[tokio::test]

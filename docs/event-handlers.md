@@ -203,8 +203,24 @@ must fail closed rather than resealing those rows.
 
 Queued envelopes produced before this canonical timestamp contract may fail full-envelope
 comparison on redelivery. Recover by replaying the persisted event from the authoritative store;
-do not loosen the comparison or edit the historical envelope. A publish failure after append is
-also recovered by publishing the persisted event, rather than redispatching the command.
+do not loosen the comparison or edit the historical envelope.
+
+With `EVENT_BUS=nats`, the runtime opts into durable publication: each new event and its pending
+publication marker commit in the same SQLite/Postgres transaction. A committed command succeeds
+even if its immediate broker publication fails; the event remains queued. An aggregate-scoped relay
+runs immediately at startup and every second thereafter, retrying batches of up to 100 events.
+Each relay pass has a ten-second deadline, and shutdown cancels the relay without deleting pending
+entries. A marker is removed only after the broker acknowledges the original event ID. A crash
+between acknowledgement and marker removal can produce duplicates, so handlers must remain
+idempotent. Run migrations before starting an existing SQLite application; generated base migrations
+include the publication queue. Postgres initializes the queue with its event schema. Older events
+are not backfilled automatically because their publication status is unknown.
+
+Custom adapters can opt in with `CommandBus::with_durable_publication()` and schedule
+`arc_core::publication::relay_pending_publications`; unsupported stores fail at opt-in rather than
+silently losing recovery. Direct event-store writes without the durable append API are not queued.
+Manual recovery of historical events still means publishing the stored envelope, never redispatching
+the original command. Selecting NATS without compiling its feature now fails startup clearly.
 In `EVENT_BUS=inprocess` dev mode, projections are still driven synchronously in-process — see §6.
 
 ## 4. Idempotency expectations
@@ -218,17 +234,22 @@ Two layers protect you:
    `event_id`) backed by a cache, collapsing obvious duplicates within the cache window.
 2. **Handler-side idempotency (required).** The cache window is finite; do not rely on it alone.
    Make the handler naturally idempotent:
-   - **HTTP state/projections:** persist a processed-event marker keyed on `event_id`, or update
-     the read model only when `sequence > existing` for per-aggregate last-writer-wins. The
-     `users_view` projector already uses version checks — keep that logic inside Arc-owned code.
+   - **HTTP state/projections:** persist a processed-event marker keyed on `event_id`, or reconcile
+     complete authoritative state before a version-gated write. A sequence gate on partial updates
+     alone can discard changes to different fields. The `users_view` and newly generated resource
+     projectors reconcile the current stream and persist deletion as a versioned `_arc_deleted`
+     tombstone; Arc stores hide tombstones from reads and collections while retaining their version.
    - **Side effects (email, webhooks):** record processed `event_id`s in a dedupe table and short-
      circuit if already present, or use the target system's idempotency key
      (Benthos sends `Idempotency-Key: <event_id>` and `X-Arc-Event-Sequence: <sequence>` headers on
      HTTP delivery).
 
 **Ordering.** `ordering: none` is the only supported manifest value today. Assume events for one
-aggregate can arrive out of order and reconcile using `sequence` (ignore an event whose `sequence`
-is not greater than what you've already applied). `ordering: per_aggregate` is reserved for a
+aggregate can arrive out of order. Arc's authoritative projection hook loads the current stream,
+folds all its events, and writes complete state once; a version gate prevents an older concurrent
+reconstruction from replacing newer state. This trades full-stream read cost for correctness;
+custom projectors must implement equivalent reconciliation rather than assuming delivery order.
+`ordering: per_aggregate` is reserved for a
 future partitioned routing mode; current generator versions reject it so users do not receive a
 false ordering guarantee.
 

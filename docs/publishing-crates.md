@@ -102,7 +102,7 @@ cache.
 
 ## Public API Policy
 
-All thirteen reusable crates are pre-1.0 and versioned in lockstep. Within a
+All fourteen reusable crates are pre-1.0 and versioned in lockstep. Within a
 compatible minor release line:
 
 - Keep `arc-core` traits source-compatible unless there is a documented migration.

@@ -41,6 +41,16 @@ pub use read_model_store::SqliteReadModelStore;
 #[cfg(test)]
 mod test_support;
 
+#[derive(QueryableByName)]
+struct PublicationIdentity {
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    aggregate_type: String,
+    #[diesel(sql_type = diesel::sql_types::Text)]
+    aggregate_id: String,
+    #[diesel(sql_type = diesel::sql_types::BigInt)]
+    sequence: i64,
+}
+
 /// Database row used for inserting events.
 #[derive(Debug, Insertable, Clone)]
 #[diesel(table_name = events)]
@@ -257,6 +267,124 @@ struct IntegrityConfig {
 }
 
 impl SqliteEventStore {
+    async fn append_internal(
+        &self,
+        aggregate_type: &str,
+        aggregate_id: &str,
+        version_check: VersionCheck,
+        new_events: Vec<Event>,
+        queue_publication: bool,
+    ) -> EventStoreResult<()> {
+        if new_events.is_empty() {
+            return Ok(());
+        }
+
+        // Defense-in-depth: reject any event with invalid audit before touching the DB.
+        validate_audit_batch(aggregate_id, &new_events)?;
+
+        let aggregate_type = aggregate_type.to_string();
+        let aggregate_id = aggregate_id.to_string();
+        let pool = self.pool.clone();
+        let integrity = self.integrity.clone();
+
+        tokio::task::spawn_blocking(move || -> EventStoreResult<()> {
+            use diesel::connection::AnsiTransactionManager;
+            use diesel::connection::TransactionManager;
+
+            let mut conn = pool.get().map_err(|e| {
+                EventStoreError::database(format!("Failed to get connection: {}", e))
+            })?;
+
+            // Reserve the writer before reading the version: a deferred read-to-write
+            // upgrade can fail immediately even with a busy timeout.
+            AnsiTransactionManager::begin_transaction_sql(&mut *conn, "BEGIN IMMEDIATE")
+                .map_err(|e| EventStoreError::database(e.to_string()))?;
+
+            let result = (|| -> EventStoreResult<()> {
+                let current_version = events::table
+                    .filter(events::aggregate_type.eq(&aggregate_type))
+                    .filter(events::aggregate_id.eq(&aggregate_id))
+                    .select(diesel::dsl::max(events::sequence))
+                    .first::<Option<i64>>(&mut *conn)
+                    .map_err(|e| EventStoreError::database(e.to_string()))?
+                    .unwrap_or(0);
+
+                if let Some(expected) = version_check.version() {
+                    if current_version != expected {
+                        return Err(EventStoreError::ConcurrencyConflict {
+                            aggregate_id: aggregate_id.clone(),
+                            expected,
+                            actual: current_version,
+                        });
+                    }
+                }
+
+                for (expected_sequence, event) in (current_version + 1..).zip(new_events.iter()) {
+                    if event.sequence != expected_sequence {
+                        return Err(EventStoreError::InvalidSequence {
+                            aggregate_id: aggregate_id.clone(),
+                            expected: expected_sequence,
+                            actual: event.sequence,
+                        });
+                    }
+                }
+
+                let mut previous_signature = if integrity.is_some() {
+                    previous_signature_for_aggregate(
+                        &mut conn,
+                        Some(&aggregate_type),
+                        &aggregate_id,
+                        current_version + 1,
+                    )?
+                } else {
+                    EventSignature::genesis()
+                };
+
+                for event in &new_events {
+                    let mut record = NewEventRecord::from_event(event, None, None)?;
+
+                    if let Some(integrity) = integrity.as_ref() {
+                        let mut persisted_event = event.clone();
+                        persisted_event.timestamp = (record.timestamp as u64) * 1000;
+                        let signature = integrity
+                            .chain
+                            .sign_event(&previous_signature, &persisted_event)
+                            .map_err(EventStoreError::from)?;
+                        previous_signature = signature.clone();
+                        record.integrity_signature = Some(signature.0);
+                        record.integrity_key_id = Some(integrity.key_id.clone());
+                    }
+
+                    diesel::insert_into(events::table)
+                        .values(&record)
+                        .execute(&mut *conn)
+                        .map_err(|e| EventStoreError::database(e.to_string()))?;
+                    if queue_publication {
+                        diesel::sql_query("INSERT INTO event_publications (event_id) VALUES (?)")
+                            .bind::<diesel::sql_types::Text, _>(event.event_id.to_string())
+                            .execute(&mut *conn)
+                            .map_err(|e| EventStoreError::database(e.to_string()))?;
+                    }
+                }
+
+                Ok(())
+            })();
+
+            // Preserve the body/commit error. COMMIT can fail (for example while
+            // an external reader holds a shared lock) and leave a transaction open.
+            let result = result.and_then(|()| {
+                AnsiTransactionManager::commit_transaction(&mut *conn)
+                    .map_err(|e| EventStoreError::database(e.to_string()))
+            });
+            if result.is_err() {
+                connection::rollback_append(&mut conn);
+            }
+            result
+        })
+        .await
+        .map_err(|e| EventStoreError::other(format!("Task join error: {}", e)))?
+    }
+
     pub async fn new(database_url: &str) -> EventStoreResult<Self> {
         let manager = ConnectionManager::<SqliteConnection>::new(database_url);
         let pool = Pool::builder()
@@ -446,6 +574,10 @@ impl EventStore for SqliteEventStore {
             .await
     }
 
+    fn supports_durable_publication(&self) -> bool {
+        true
+    }
+
     async fn append_to(
         &self,
         aggregate_type: &str,
@@ -453,108 +585,79 @@ impl EventStore for SqliteEventStore {
         version_check: VersionCheck,
         new_events: Vec<Event>,
     ) -> EventStoreResult<()> {
-        if new_events.is_empty() {
-            return Ok(());
-        }
+        self.append_internal(
+            aggregate_type,
+            aggregate_id,
+            version_check,
+            new_events,
+            false,
+        )
+        .await
+    }
 
-        // Defense-in-depth: reject any event with invalid audit before touching the DB.
-        validate_audit_batch(aggregate_id, &new_events)?;
+    async fn append_to_with_publication(
+        &self,
+        aggregate_type: &str,
+        aggregate_id: &str,
+        version_check: VersionCheck,
+        new_events: Vec<Event>,
+    ) -> EventStoreResult<()> {
+        self.append_internal(
+            aggregate_type,
+            aggregate_id,
+            version_check,
+            new_events,
+            true,
+        )
+        .await
+    }
 
-        let aggregate_type = aggregate_type.to_string();
-        let aggregate_id = aggregate_id.to_string();
+    async fn pending_publications(
+        &self,
+        aggregate_type: &str,
+        limit: usize,
+    ) -> EventStoreResult<Vec<Event>> {
         let pool = self.pool.clone();
-        let integrity = self.integrity.clone();
+        let aggregate_type = aggregate_type.to_string();
+        let identities = tokio::task::spawn_blocking(move || -> EventStoreResult<Vec<PublicationIdentity>> {
+            let mut conn = pool.get().map_err(|e| EventStoreError::database(e.to_string()))?;
+            diesel::sql_query("SELECT e.aggregate_type, e.aggregate_id, e.sequence FROM event_publications p JOIN events e ON e.event_id = p.event_id WHERE e.aggregate_type = ? ORDER BY e.id LIMIT ?")
+                .bind::<diesel::sql_types::Text, _>(&aggregate_type)
+                .bind::<diesel::sql_types::BigInt, _>(limit.min(1000) as i64)
+                .load(&mut *conn)
+                .map_err(|e| EventStoreError::database(e.to_string()))
+        }).await.map_err(|e| EventStoreError::other(e.to_string()))??;
+        let mut pending = Vec::with_capacity(identities.len());
+        for identity in identities {
+            let event = self
+                .load_event(
+                    &identity.aggregate_type,
+                    &identity.aggregate_id,
+                    identity.sequence,
+                )
+                .await?
+                .ok_or_else(|| {
+                    EventStoreError::other("queued event is missing from authoritative store")
+                })?;
+            pending.push(event);
+        }
+        Ok(pending)
+    }
 
+    async fn acknowledge_publication(&self, event_id: Uuid) -> EventStoreResult<()> {
+        let pool = self.pool.clone();
         tokio::task::spawn_blocking(move || -> EventStoreResult<()> {
-            use diesel::connection::AnsiTransactionManager;
-            use diesel::connection::TransactionManager;
-
-            let mut conn = pool.get().map_err(|e| {
-                EventStoreError::database(format!("Failed to get connection: {}", e))
-            })?;
-
-            // Reserve the writer before reading the version: a deferred read-to-write
-            // upgrade can fail immediately even with a busy timeout.
-            AnsiTransactionManager::begin_transaction_sql(&mut *conn, "BEGIN IMMEDIATE")
+            let mut conn = pool
+                .get()
                 .map_err(|e| EventStoreError::database(e.to_string()))?;
-
-            let result = (|| -> EventStoreResult<()> {
-                let current_version = events::table
-                    .filter(events::aggregate_type.eq(&aggregate_type))
-                    .filter(events::aggregate_id.eq(&aggregate_id))
-                    .select(diesel::dsl::max(events::sequence))
-                    .first::<Option<i64>>(&mut *conn)
-                    .map_err(|e| EventStoreError::database(e.to_string()))?
-                    .unwrap_or(0);
-
-                if let Some(expected) = version_check.version() {
-                    if current_version != expected {
-                        return Err(EventStoreError::ConcurrencyConflict {
-                            aggregate_id: aggregate_id.clone(),
-                            expected,
-                            actual: current_version,
-                        });
-                    }
-                }
-
-                for (expected_sequence, event) in (current_version + 1..).zip(new_events.iter()) {
-                    if event.sequence != expected_sequence {
-                        return Err(EventStoreError::InvalidSequence {
-                            aggregate_id: aggregate_id.clone(),
-                            expected: expected_sequence,
-                            actual: event.sequence,
-                        });
-                    }
-                }
-
-                let mut previous_signature = if integrity.is_some() {
-                    previous_signature_for_aggregate(
-                        &mut conn,
-                        Some(&aggregate_type),
-                        &aggregate_id,
-                        current_version + 1,
-                    )?
-                } else {
-                    EventSignature::genesis()
-                };
-
-                for event in &new_events {
-                    let mut record = NewEventRecord::from_event(event, None, None)?;
-
-                    if let Some(integrity) = integrity.as_ref() {
-                        let mut persisted_event = event.clone();
-                        persisted_event.timestamp = (record.timestamp as u64) * 1000;
-                        let signature = integrity
-                            .chain
-                            .sign_event(&previous_signature, &persisted_event)
-                            .map_err(EventStoreError::from)?;
-                        previous_signature = signature.clone();
-                        record.integrity_signature = Some(signature.0);
-                        record.integrity_key_id = Some(integrity.key_id.clone());
-                    }
-
-                    diesel::insert_into(events::table)
-                        .values(&record)
-                        .execute(&mut *conn)
-                        .map_err(|e| EventStoreError::database(e.to_string()))?;
-                }
-
-                Ok(())
-            })();
-
-            // Preserve the body/commit error. COMMIT can fail (for example while
-            // an external reader holds a shared lock) and leave a transaction open.
-            let result = result.and_then(|()| {
-                AnsiTransactionManager::commit_transaction(&mut *conn)
-                    .map_err(|e| EventStoreError::database(e.to_string()))
-            });
-            if result.is_err() {
-                connection::rollback_append(&mut conn);
-            }
-            result
+            diesel::sql_query("DELETE FROM event_publications WHERE event_id = ?")
+                .bind::<diesel::sql_types::Text, _>(event_id.to_string())
+                .execute(&mut *conn)
+                .map_err(|e| EventStoreError::database(e.to_string()))?;
+            Ok(())
         })
         .await
-        .map_err(|e| EventStoreError::other(format!("Task join error: {}", e)))?
+        .map_err(|e| EventStoreError::other(e.to_string()))?
     }
 
     async fn load(&self, aggregate_id: &str) -> EventStoreResult<Vec<Event>> {
@@ -926,6 +1029,213 @@ mod tests {
         integrity_signature: Option<String>,
         #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
         integrity_key_id: Option<String>,
+    }
+
+    #[derive(Default)]
+    struct PublicationBus {
+        fail_ack: std::sync::atomic::AtomicBool,
+        delivered: std::sync::Mutex<Vec<Event>>,
+    }
+
+    #[async_trait]
+    impl arc_core::event_bus::EventBus for PublicationBus {
+        async fn publish(&self, events: Vec<Event>) -> arc_core::event_bus::EventBusResult<()> {
+            self.delivered.lock().unwrap().extend(events);
+            if self.fail_ack.load(std::sync::atomic::Ordering::SeqCst) {
+                Err(arc_core::event_bus::EventBusError::other(
+                    "injected lost broker ack",
+                ))
+            } else {
+                Ok(())
+            }
+        }
+        async fn subscribe(
+            &mut self,
+            _: Box<dyn arc_core::event_bus::EventHandler>,
+        ) -> arc_core::event_bus::EventBusResult<()> {
+            Ok(())
+        }
+    }
+
+    struct PublicationCommand;
+    impl arc_core::aggregate::Command for PublicationCommand {
+        fn aggregate_id(&self) -> &str {
+            "command-recovery"
+        }
+    }
+    #[derive(Default)]
+    struct PublicationAggregate {
+        version: i64,
+    }
+    #[async_trait]
+    impl arc_core::aggregate::Aggregate for PublicationAggregate {
+        type Command = PublicationCommand;
+        type Event = ();
+        type Error = std::io::Error;
+        fn aggregate_type() -> &'static str {
+            "PublicationTest"
+        }
+        fn version(&self) -> i64 {
+            self.version
+        }
+        async fn handle(&self, _: PublicationCommand) -> Result<Vec<Event>, Self::Error> {
+            Ok(vec![Event::new(NewEvent {
+                aggregate_type: "PublicationTest",
+                aggregate_id: "command-recovery",
+                sequence: self.version + 1,
+                event_type: "Changed",
+                payload: json!({}),
+            })])
+        }
+        fn apply(&mut self, event: &Event) {
+            self.version = event.sequence;
+        }
+    }
+
+    #[tokio::test]
+    async fn durable_command_returns_committed_success_after_publish_ack_failure() {
+        use arc_core::command_bus::{CommandBus, CommandContext};
+        use arc_core::publication::relay_pending_publications;
+        let store = setup_test_store().await;
+        let offline_bus = PublicationBus::default();
+        offline_bus
+            .fail_ack
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let command_bus =
+            CommandBus::<PublicationAggregate>::new(Box::new(store.clone()), Box::new(offline_bus))
+                .with_durable_publication()
+                .unwrap();
+        let committed = command_bus
+            .dispatch(PublicationCommand, CommandContext::for_actor("test"))
+            .await
+            .unwrap();
+        assert_eq!(committed.len(), 1);
+        assert_eq!(
+            store
+                .pending_publications("PublicationTest", 100)
+                .await
+                .unwrap(),
+            committed
+        );
+        let recovered_bus = PublicationBus::default();
+        assert_eq!(
+            relay_pending_publications(&store, &recovered_bus, "PublicationTest", 100)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(*recovered_bus.delivered.lock().unwrap(), committed);
+        assert!(store
+            .pending_publications("PublicationTest", 100)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    struct RemoveDatabase(std::path::PathBuf);
+    impl Drop for RemoveDatabase {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    #[tokio::test]
+    async fn durable_publication_survives_reopen_and_lost_ack_with_same_event_id() {
+        use arc_core::publication::relay_pending_publications;
+        use diesel::connection::SimpleConnection;
+        let path = std::env::temp_dir().join(format!("arc-publication-{}.sqlite", Uuid::new_v4()));
+        let _cleanup = RemoveDatabase(path.clone());
+        let url = path.to_str().unwrap();
+        let event = stamped_event("User", "recover", 1, "UserCreated", json!({"name": "Ada"}))
+            .with_stored_timestamp_precision();
+        {
+            let store = SqliteEventStore::new(url).await.unwrap();
+            let mut conn = store.pool.get().unwrap();
+            crate::test_support::migrate(&mut conn);
+            conn.batch_execute("PRAGMA journal_mode=WAL;").unwrap();
+            drop(conn);
+            store
+                .append_to_with_publication(
+                    "User",
+                    "recover",
+                    VersionCheck::New,
+                    vec![event.clone()],
+                )
+                .await
+                .unwrap();
+            let other = stamped_event("Product", "other", 1, "ProductCreated", json!({}));
+            store
+                .append_to_with_publication("Product", "other", VersionCheck::New, vec![other])
+                .await
+                .unwrap();
+            // Dropping every store handle models a process stopping after commit,
+            // before it ever attempts publication.
+        }
+        let store = SqliteEventStore::new(url).await.unwrap();
+        assert_eq!(
+            store.pending_publications("User", 0).await.unwrap().len(),
+            0
+        );
+        assert_eq!(
+            store.pending_publications("User", 1).await.unwrap(),
+            vec![event.clone()]
+        );
+        let bus = PublicationBus::default();
+        bus.fail_ack
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(relay_pending_publications(&store, &bus, "User", 100)
+            .await
+            .is_err());
+        assert_eq!(
+            store.pending_publications("User", 100).await.unwrap(),
+            vec![event.clone()]
+        );
+        bus.fail_ack
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(
+            relay_pending_publications(&store, &bus, "User", 100)
+                .await
+                .unwrap(),
+            1
+        );
+        assert!(store
+            .pending_publications("User", 100)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            store
+                .pending_publications("Product", 100)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(*bus.delivered.lock().unwrap(), vec![event.clone(), event]);
+    }
+
+    #[tokio::test]
+    async fn publication_marker_failure_rolls_back_event_append() {
+        use diesel::connection::SimpleConnection;
+        let store = setup_test_store().await;
+        store.pool.get().unwrap().batch_execute(
+            "CREATE TRIGGER reject_publication BEFORE INSERT ON event_publications BEGIN SELECT RAISE(ABORT, 'injected queue failure'); END;"
+        ).unwrap();
+        let event = stamped_event("User", "rollback", 1, "UserCreated", json!({}));
+        assert!(store
+            .append_to_with_publication("User", "rollback", VersionCheck::New, vec![event])
+            .await
+            .is_err());
+        assert!(store
+            .load_stream("User", "rollback")
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(store
+            .pending_publications("User", 100)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]

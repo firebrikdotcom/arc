@@ -181,7 +181,7 @@ impl ReadModelStore for SqliteReadModelStore {
                 ReadModelError::query_failed(format!("Failed to get connection: {e}"))
             })?;
             let rows: Vec<DataRow> =
-                diesel::sql_query(format!("SELECT data FROM {table} WHERE id = ? LIMIT 1"))
+                diesel::sql_query(format!("SELECT data FROM {table} WHERE COALESCE(json_type(data, '$._arc_deleted'), '') <> 'true' AND id = ? LIMIT 1"))
                     .bind::<Text, _>(key)
                     .load(&mut *conn)
                     .map_err(|e| ReadModelError::query_failed(e.to_string()))?;
@@ -226,7 +226,7 @@ impl ReadModelStore for SqliteReadModelStore {
             let mut conn = pool.get().map_err(|e| {
                 ReadModelError::query_failed(format!("Failed to get connection: {e}"))
             })?;
-            let sql = format!("SELECT data FROM {table} WHERE json_extract(data, ?) IS ?");
+            let sql = format!("SELECT data FROM {table} WHERE COALESCE(json_type(data, '$._arc_deleted'), '') <> 'true' AND json_extract(data, ?) IS ?");
             let rows: Vec<DataRow> = diesel::sql_query(sql)
                 .bind::<Text, _>(path)
                 .bind::<Nullable<Text>, _>(bind_text)
@@ -249,7 +249,7 @@ impl ReadModelStore for SqliteReadModelStore {
             let mut conn = pool.get().map_err(|e| {
                 ReadModelError::query_failed(format!("Failed to get connection: {e}"))
             })?;
-            let rows: Vec<DataRow> = diesel::sql_query(format!("SELECT data FROM {table}"))
+            let rows: Vec<DataRow> = diesel::sql_query(format!("SELECT data FROM {table} WHERE COALESCE(json_type(data, '$._arc_deleted'), '') <> 'true'"))
                 .load(&mut *conn)
                 .map_err(|e| ReadModelError::query_failed(e.to_string()))?;
             Ok(rows.into_iter().map(|r| r.data).collect())
@@ -272,7 +272,7 @@ impl ReadModelStore for SqliteReadModelStore {
             CollectionOrder::NameAsc => "COALESCE(json_extract(data, '$.name'), '') COLLATE BINARY ASC, id COLLATE BINARY ASC",
             CollectionOrder::NameDesc => "COALESCE(json_extract(data, '$.name'), '') COLLATE BINARY DESC, id COLLATE BINARY ASC",
         };
-        let sql = format!("SELECT data FROM {table} WHERE (? = '' OR instr(lower(COALESCE(json_extract(data, '$.name'), '')), ?) > 0) ORDER BY {order} LIMIT ? OFFSET ?");
+        let sql = format!("SELECT data FROM {table} WHERE COALESCE(json_type(data, '$._arc_deleted'), '') <> 'true' AND (? = '' OR instr(lower(COALESCE(json_extract(data, '$.name'), '')), ?) > 0) ORDER BY {order} LIMIT ? OFFSET ?");
         let pool = self.pool.clone();
         let query = query.clone();
         tokio::task::spawn_blocking(move || {
@@ -337,6 +337,49 @@ mod tests {
             "password_hash": "$argon2id$v=19$m=19456,t=2,p=1$x$y",
             "version": version,
         })
+    }
+
+    #[tokio::test]
+    async fn tombstones_are_hidden_before_pagination_and_reject_stale_rows() {
+        let store = setup().await;
+        store
+            .upsert(Upsert::new(
+                "users_view",
+                "a",
+                json!({"id":"a","version":2,"_arc_deleted":true}),
+            ))
+            .await
+            .unwrap();
+        store
+            .upsert(Upsert::new(
+                "users_view",
+                "a",
+                json!({"id":"a","version":1,"name":"Resurrected","email":"old@example.test"}),
+            ))
+            .await
+            .unwrap();
+        store
+            .upsert(Upsert::new(
+                "users_view",
+                "b",
+                json!({"id":"b","version":1,"name":"Visible","deleted":true}),
+            ))
+            .await
+            .unwrap();
+        assert!(store.get("users_view", "a").await.unwrap().is_none());
+        assert!(store
+            .find_by("users_view", "email", &json!("old@example.test"))
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(store.list("users_view").await.unwrap().len(), 1);
+        let page = store
+            .collection("users_view", &CollectionQuery::new(1, 0).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(page.rows.len(), 1);
+        assert_eq!(page.rows[0]["id"], "b");
+        assert!(!page.has_next);
     }
 
     #[tokio::test]

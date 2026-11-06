@@ -225,6 +225,135 @@ struct IntegrityConfig {
 }
 
 impl PostgresEventStore {
+    async fn append_internal(
+        &self,
+        aggregate_type: &str,
+        aggregate_id: &str,
+        version_check: VersionCheck,
+        new_events: Vec<Event>,
+        queue_publication: bool,
+    ) -> EventStoreResult<()> {
+        if new_events.is_empty() {
+            return Ok(());
+        }
+
+        // Defense-in-depth: reject any event with invalid audit before touching the DB.
+        validate_audit_batch(aggregate_id, &new_events)?;
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| EventStoreError::database(e.to_string()))?;
+
+        let current_version: i64 = sqlx::query(
+            "SELECT COALESCE(MAX(sequence), 0) AS v FROM events
+             WHERE aggregate_type = $1 AND aggregate_id = $2",
+        )
+        .bind(aggregate_type)
+        .bind(aggregate_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| EventStoreError::database(e.to_string()))?
+        .try_get("v")
+        .map_err(|e| EventStoreError::database(e.to_string()))?;
+
+        if let Some(expected) = version_check.version() {
+            if current_version != expected {
+                return Err(EventStoreError::ConcurrencyConflict {
+                    aggregate_id: aggregate_id.to_string(),
+                    expected,
+                    actual: current_version,
+                });
+            }
+        }
+
+        for (expected_sequence, event) in (current_version + 1..).zip(new_events.iter()) {
+            if event.sequence != expected_sequence {
+                return Err(EventStoreError::InvalidSequence {
+                    aggregate_id: aggregate_id.to_string(),
+                    expected: expected_sequence,
+                    actual: event.sequence,
+                });
+            }
+        }
+
+        let mut previous_signature = if self.integrity.is_some() {
+            self.previous_signature_for_aggregate(
+                &mut tx,
+                Some(aggregate_type),
+                aggregate_id,
+                current_version + 1,
+            )
+            .await?
+        } else {
+            EventSignature::genesis()
+        };
+
+        for event in &new_events {
+            let mut signature_str = None;
+            let mut key_id_str = None;
+
+            if let Some(integrity) = self.integrity.as_ref() {
+                // Sign based on row-seconds timestamp parity with SQLite.
+                let timestamp_seconds = (event.timestamp / 1000) as i64;
+                let mut persisted_event = event.clone();
+                persisted_event.timestamp = (timestamp_seconds as u64) * 1000;
+
+                let signature = integrity
+                    .chain
+                    .sign_event(&previous_signature, &persisted_event)
+                    .map_err(EventStoreError::from)?;
+                previous_signature = signature.clone();
+                signature_str = Some(signature.0);
+                key_id_str = Some(integrity.key_id.clone());
+            }
+
+            let row = EventRow::from_event(event, signature_str, key_id_str);
+            sqlx::query(
+                r#"INSERT INTO events
+                    (event_id, aggregate_type, aggregate_id, sequence, event_type, payload,
+                     "timestamp", actor_id, actor_session_id, source_ip, user_agent,
+                     timestamp_utc_us, causation_id, correlation_id,
+                     integrity_signature, integrity_key_id)
+                   VALUES ($1, $2, $3, $4, $5, $6::text::json, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)"#,
+            )
+            .bind(&row.event_id)
+            .bind(&row.aggregate_type)
+            .bind(&row.aggregate_id)
+            .bind(row.sequence)
+            .bind(&row.event_type)
+            .bind(serde_json::to_string(&row.payload).map_err(|e| {
+                EventStoreError::serialization(format!("Failed to serialize event payload: {e}"))
+            })?)
+            .bind(row.timestamp)
+            .bind(&row.actor_id)
+            .bind(&row.actor_session_id)
+            .bind(&row.source_ip)
+            .bind(&row.user_agent)
+            .bind(row.timestamp_utc_us)
+            .bind(&row.causation_id)
+            .bind(&row.correlation_id)
+            .bind(&row.integrity_signature)
+            .bind(&row.integrity_key_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| EventStoreError::database(e.to_string()))?;
+            if queue_publication {
+                sqlx::query("INSERT INTO event_publications (event_id) VALUES ($1)")
+                    .bind(event.event_id.to_string())
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| EventStoreError::database(e.to_string()))?;
+            }
+        }
+
+        tx.commit()
+            .await
+            .map_err(|e| EventStoreError::database(e.to_string()))?;
+        Ok(())
+    }
+
     /// Build a store from a Postgres connection URL, creating a small pool.
     pub async fn new(database_url: &str) -> EventStoreResult<Self> {
         let pool = PgPoolOptions::new()
@@ -299,6 +428,8 @@ impl PostgresEventStore {
             .execute(&self.pool)
             .await
             .map_err(|e| EventStoreError::database(e.to_string()))?;
+        sqlx::raw_sql("CREATE TABLE IF NOT EXISTS event_publications (event_id TEXT PRIMARY KEY REFERENCES events(event_id))")
+            .execute(&self.pool).await.map_err(|e| EventStoreError::database(e.to_string()))?;
         sqlx::raw_sql(SNAPSHOTS_SCHEMA)
             .execute(&self.pool)
             .await
@@ -488,6 +619,10 @@ impl EventStore for PostgresEventStore {
             .await
     }
 
+    fn supports_durable_publication(&self) -> bool {
+        true
+    }
+
     async fn append_to(
         &self,
         aggregate_type: &str,
@@ -495,115 +630,67 @@ impl EventStore for PostgresEventStore {
         version_check: VersionCheck,
         new_events: Vec<Event>,
     ) -> EventStoreResult<()> {
-        if new_events.is_empty() {
-            return Ok(());
-        }
-
-        // Defense-in-depth: reject any event with invalid audit before touching the DB.
-        validate_audit_batch(aggregate_id, &new_events)?;
-
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| EventStoreError::database(e.to_string()))?;
-
-        let current_version: i64 = sqlx::query(
-            "SELECT COALESCE(MAX(sequence), 0) AS v FROM events
-             WHERE aggregate_type = $1 AND aggregate_id = $2",
+        self.append_internal(
+            aggregate_type,
+            aggregate_id,
+            version_check,
+            new_events,
+            false,
         )
-        .bind(aggregate_type)
-        .bind(aggregate_id)
-        .fetch_one(&mut *tx)
         .await
-        .map_err(|e| EventStoreError::database(e.to_string()))?
-        .try_get("v")
-        .map_err(|e| EventStoreError::database(e.to_string()))?;
+    }
 
-        if let Some(expected) = version_check.version() {
-            if current_version != expected {
-                return Err(EventStoreError::ConcurrencyConflict {
-                    aggregate_id: aggregate_id.to_string(),
-                    expected,
-                    actual: current_version,
-                });
-            }
+    async fn append_to_with_publication(
+        &self,
+        aggregate_type: &str,
+        aggregate_id: &str,
+        version_check: VersionCheck,
+        new_events: Vec<Event>,
+    ) -> EventStoreResult<()> {
+        self.append_internal(
+            aggregate_type,
+            aggregate_id,
+            version_check,
+            new_events,
+            true,
+        )
+        .await
+    }
+
+    async fn pending_publications(
+        &self,
+        aggregate_type: &str,
+        limit: usize,
+    ) -> EventStoreResult<Vec<Event>> {
+        let identities = sqlx::query("SELECT e.aggregate_type, e.aggregate_id, e.sequence FROM event_publications p JOIN events e ON e.event_id = p.event_id WHERE e.aggregate_type = $1 ORDER BY e.id LIMIT $2")
+            .bind(aggregate_type).bind(limit.min(1000) as i64)
+            .fetch_all(&self.pool).await.map_err(|e| EventStoreError::database(e.to_string()))?;
+        let mut pending = Vec::with_capacity(identities.len());
+        for identity in identities {
+            let aggregate_type: String = identity
+                .try_get("aggregate_type")
+                .map_err(|e| EventStoreError::database(e.to_string()))?;
+            let aggregate_id: String = identity
+                .try_get("aggregate_id")
+                .map_err(|e| EventStoreError::database(e.to_string()))?;
+            let sequence: i64 = identity
+                .try_get("sequence")
+                .map_err(|e| EventStoreError::database(e.to_string()))?;
+            let event = self
+                .load_event(&aggregate_type, &aggregate_id, sequence)
+                .await?
+                .ok_or_else(|| {
+                    EventStoreError::other("queued event is missing from authoritative store")
+                })?;
+            pending.push(event);
         }
+        Ok(pending)
+    }
 
-        for (expected_sequence, event) in (current_version + 1..).zip(new_events.iter()) {
-            if event.sequence != expected_sequence {
-                return Err(EventStoreError::InvalidSequence {
-                    aggregate_id: aggregate_id.to_string(),
-                    expected: expected_sequence,
-                    actual: event.sequence,
-                });
-            }
-        }
-
-        let mut previous_signature = if self.integrity.is_some() {
-            self.previous_signature_for_aggregate(
-                &mut tx,
-                Some(aggregate_type),
-                aggregate_id,
-                current_version + 1,
-            )
-            .await?
-        } else {
-            EventSignature::genesis()
-        };
-
-        for event in &new_events {
-            let mut signature_str = None;
-            let mut key_id_str = None;
-
-            if let Some(integrity) = self.integrity.as_ref() {
-                // Sign based on row-seconds timestamp parity with SQLite.
-                let timestamp_seconds = (event.timestamp / 1000) as i64;
-                let mut persisted_event = event.clone();
-                persisted_event.timestamp = (timestamp_seconds as u64) * 1000;
-
-                let signature = integrity
-                    .chain
-                    .sign_event(&previous_signature, &persisted_event)
-                    .map_err(EventStoreError::from)?;
-                previous_signature = signature.clone();
-                signature_str = Some(signature.0);
-                key_id_str = Some(integrity.key_id.clone());
-            }
-
-            let row = EventRow::from_event(event, signature_str, key_id_str);
-            sqlx::query(
-                r#"INSERT INTO events
-                    (event_id, aggregate_type, aggregate_id, sequence, event_type, payload,
-                     "timestamp", actor_id, actor_session_id, source_ip, user_agent,
-                     timestamp_utc_us, causation_id, correlation_id,
-                     integrity_signature, integrity_key_id)
-                   VALUES ($1, $2, $3, $4, $5, $6::text::json, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)"#,
-            )
-            .bind(&row.event_id)
-            .bind(&row.aggregate_type)
-            .bind(&row.aggregate_id)
-            .bind(row.sequence)
-            .bind(&row.event_type)
-            .bind(serde_json::to_string(&row.payload).map_err(|e| {
-                EventStoreError::serialization(format!("Failed to serialize event payload: {e}"))
-            })?)
-            .bind(row.timestamp)
-            .bind(&row.actor_id)
-            .bind(&row.actor_session_id)
-            .bind(&row.source_ip)
-            .bind(&row.user_agent)
-            .bind(row.timestamp_utc_us)
-            .bind(&row.causation_id)
-            .bind(&row.correlation_id)
-            .bind(&row.integrity_signature)
-            .bind(&row.integrity_key_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| EventStoreError::database(e.to_string()))?;
-        }
-
-        tx.commit()
+    async fn acknowledge_publication(&self, event_id: Uuid) -> EventStoreResult<()> {
+        sqlx::query("DELETE FROM event_publications WHERE event_id = $1")
+            .bind(event_id.to_string())
+            .execute(&self.pool)
             .await
             .map_err(|e| EventStoreError::database(e.to_string()))?;
         Ok(())
@@ -942,7 +1029,7 @@ mod tests {
         store.initialize_schema().await.unwrap();
 
         // Clean start for each test
-        sqlx::query("TRUNCATE events RESTART IDENTITY")
+        sqlx::query("TRUNCATE event_publications, events RESTART IDENTITY")
             .execute(store.pool())
             .await
             .unwrap();
@@ -961,7 +1048,7 @@ mod tests {
             .unwrap();
         store.initialize_schema().await.unwrap();
 
-        sqlx::query("TRUNCATE events RESTART IDENTITY")
+        sqlx::query("TRUNCATE event_publications, events RESTART IDENTITY")
             .execute(store.pool())
             .await
             .unwrap();
@@ -1082,6 +1169,96 @@ mod tests {
             self.0.process_external_delivery(event).await?;
             Ok(())
         }
+    }
+
+    #[derive(Default)]
+    struct PublicationBus {
+        fail_ack: std::sync::atomic::AtomicBool,
+        delivered: std::sync::Mutex<Vec<Event>>,
+    }
+    #[async_trait]
+    impl EventBus for PublicationBus {
+        async fn publish(&self, events: Vec<Event>) -> arc_core::event_bus::EventBusResult<()> {
+            self.delivered.lock().unwrap().extend(events);
+            if self.fail_ack.load(Ordering::SeqCst) {
+                Err(arc_core::event_bus::EventBusError::other(
+                    "injected lost broker ack",
+                ))
+            } else {
+                Ok(())
+            }
+        }
+        async fn subscribe(
+            &mut self,
+            _: Box<dyn EventHandler>,
+        ) -> arc_core::event_bus::EventBusResult<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn durable_publication_reopens_retains_failed_ack_and_filters_aggregate_type() {
+        use arc_core::publication::relay_pending_publications;
+        let Some(store) = setup_test_store().await else {
+            return;
+        };
+        let event = stamped_event("User", "recover", 1, "UserCreated", json!({"n":1.0}))
+            .with_stored_timestamp_precision();
+        store
+            .append_to_with_publication("User", "recover", VersionCheck::New, vec![event.clone()])
+            .await
+            .unwrap();
+        let other = stamped_event("Product", "recover", 1, "ProductCreated", json!({}));
+        store
+            .append_to_with_publication("Product", "recover", VersionCheck::New, vec![other])
+            .await
+            .unwrap();
+        store.pool().close().await;
+        drop(store);
+        let reopened =
+            PostgresEventStore::new(&env::var("ARC_POSTGRES_TEST_DATABASE_URL").unwrap())
+                .await
+                .unwrap();
+        assert!(reopened
+            .pending_publications("User", 0)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            reopened.pending_publications("User", 1).await.unwrap(),
+            vec![event.clone()]
+        );
+        let bus = PublicationBus::default();
+        bus.fail_ack.store(true, Ordering::SeqCst);
+        assert!(relay_pending_publications(&reopened, &bus, "User", 100)
+            .await
+            .is_err());
+        assert_eq!(
+            reopened.pending_publications("User", 100).await.unwrap(),
+            vec![event.clone()]
+        );
+        bus.fail_ack.store(false, Ordering::SeqCst);
+        assert_eq!(
+            relay_pending_publications(&reopened, &bus, "User", 100)
+                .await
+                .unwrap(),
+            1
+        );
+        assert!(reopened
+            .pending_publications("User", 100)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            reopened
+                .pending_publications("Product", 100)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(*bus.delivered.lock().unwrap(), vec![event.clone(), event]);
     }
 
     #[tokio::test]

@@ -31,7 +31,6 @@
     <div class="panel__head"><h2>Password</h2></div>
     <form id="password-form" class="panel__body" action="/admin/profile-password" method="post" data-controller="password-form" data-turbo="false" data-action="submit->password-form#handleSubmit">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <input type="hidden" name="current_email" value="{{ user_email }}">
         <div class="field">
             <label for="old_password">Old password</label>
             <input type="password" name="old_password" id="old_password" autocomplete="current-password" data-password-form-target="oldPassword" required minlength="5" maxlength="45">

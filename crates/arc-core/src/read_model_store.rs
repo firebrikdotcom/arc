@@ -191,6 +191,9 @@ impl Upsert {
 /// store instance (different tables in the same database). Interior
 /// mutability (connection pools, `Mutex`, etc.) is expected.
 #[async_trait]
+/// Framework deletion tombstones use the reserved boolean `_arc_deleted: true`.
+/// Implementations retain them for upsert version checks and exclude them from
+/// get/find/list/collection reads, applying exclusion before pagination.
 pub trait ReadModelStore: Send + Sync {
     /// Insert or update a row, version-gated.
     ///
@@ -269,6 +272,11 @@ impl Default for InMemoryReadModelStore {
     }
 }
 
+/// Reserved framework tombstone: retained for version comparisons, hidden from reads.
+fn is_tombstone(row: &Row) -> bool {
+    row.get("_arc_deleted").and_then(serde_json::Value::as_bool) == Some(true)
+}
+
 fn row_version(row: &Row) -> i64 {
     row.get("version").and_then(|v| v.as_i64()).unwrap_or(0)
 }
@@ -302,7 +310,7 @@ impl ReadModelStore for InMemoryReadModelStore {
             .lock()
             .unwrap()
             .get(table)
-            .and_then(|t| t.get(key).cloned()))
+            .and_then(|t| t.get(key).filter(|row| !is_tombstone(row)).cloned()))
     }
 
     async fn find_by(
@@ -318,7 +326,7 @@ impl ReadModelStore for InMemoryReadModelStore {
             .get(table)
             .map(|t| {
                 t.values()
-                    .filter(|row| row.get(field) == Some(value))
+                    .filter(|row| !is_tombstone(row) && row.get(field) == Some(value))
                     .cloned()
                     .collect()
             })
@@ -326,7 +334,11 @@ impl ReadModelStore for InMemoryReadModelStore {
     }
 
     async fn list(&self, table: &str) -> ReadModelResult<Vec<Row>> {
-        Ok(self.get_rows(table))
+        Ok(self
+            .get_rows(table)
+            .into_iter()
+            .filter(|row| !is_tombstone(row))
+            .collect())
     }
 
     async fn collection(
@@ -341,6 +353,7 @@ impl ReadModelStore for InMemoryReadModelStore {
             .get(table)
             .into_iter()
             .flat_map(|t| t.iter())
+            .filter(|(_, row)| !is_tombstone(row))
             .filter(|(_, row)| {
                 needle.is_empty()
                     || row["name"]
@@ -384,6 +397,48 @@ mod tests {
 
     fn row(id: &str, name: &str, version: i64) -> Row {
         json!({"id": id, "name": name, "version": version})
+    }
+
+    #[tokio::test]
+    async fn tombstones_are_hidden_before_collection_pagination() {
+        let store = InMemoryReadModelStore::new();
+        store
+            .upsert(Upsert::new(
+                "users_view",
+                "a",
+                json!({"id":"a","version":2,"_arc_deleted":true}),
+            ))
+            .await
+            .unwrap();
+        store
+            .upsert(Upsert::new(
+                "users_view",
+                "a",
+                json!({"id":"a","version":1,"name":"Resurrected","email":"old@example.test"}),
+            ))
+            .await
+            .unwrap();
+        store
+            .upsert(Upsert::new(
+                "users_view",
+                "b",
+                json!({"id":"b","version":1,"name":"Visible","deleted":true}),
+            ))
+            .await
+            .unwrap();
+        assert!(store.get("users_view", "a").await.unwrap().is_none());
+        assert!(store
+            .find_by("users_view", "email", &json!("old@example.test"))
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(store.list("users_view").await.unwrap().len(), 1);
+        let page = store
+            .collection("users_view", &CollectionQuery::new(1, 0).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(page.rows[0]["id"], "b");
+        assert!(!page.has_next);
     }
 
     #[tokio::test]

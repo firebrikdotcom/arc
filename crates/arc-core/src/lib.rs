@@ -26,6 +26,7 @@ pub mod event_bus;
 pub mod event_store;
 pub mod integrity;
 pub mod projection;
+pub mod publication;
 pub mod read_model_store;
 pub mod session;
 pub mod snapshot;

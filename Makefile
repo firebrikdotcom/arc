@@ -108,6 +108,7 @@ migrate-new: ## Create a new Diesel migration (usage: make migrate-new NAME=migr
 test: ## Run all tests
 	@echo "$(GREEN)Running tests...$(NC)"
 	cargo test --workspace --all-features
+	npm run test:verification
 
 # Run tests with full output including println! statements
 test-verbose: ## Run tests with verbose output

@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::sleep;
 use uuid::Uuid;
@@ -31,6 +32,7 @@ struct ChildProcess {
     child: Child,
     _temp_dir: Option<TempDir>,
     docker_container: Option<String>,
+    log_path: Option<PathBuf>,
 }
 
 impl Drop for ChildProcess {
@@ -151,6 +153,7 @@ async fn wait_for_nats(
                         child,
                         _temp_dir: temp_dir,
                         docker_container,
+                        log_path: None,
                     },
                 )));
             }
@@ -268,6 +271,8 @@ fn user_registered(id: &str) -> Event {
         }),
     })
     .with_audit(AuditMetadata::test_default())
+    // Match CommandBus publication and the event store's timestamp precision.
+    .with_stored_timestamp_precision()
 }
 
 async fn start_projection_app(
@@ -356,6 +361,9 @@ fn start_benthos(
     let consumer = format!("benthos_{}", Uuid::new_v4().simple());
     let config_path = config_dir.path.join("config/benthos/generated/events.yaml");
     let mut docker_container = None;
+    let log_path = config_dir.path.join("connect.log");
+    let stdout = fs::File::create(&log_path)?;
+    let stderr = stdout.try_clone()?;
     let child = match runtime {
         ConnectRuntime::Local(binary) => Command::new(binary)
             .arg("run")
@@ -364,8 +372,8 @@ fn start_benthos(
             .env("NATS_STREAM", stream)
             .env("NATS_CONSUMER", &consumer)
             .env("INTERNAL_PROJECTION_TOKEN", "test-projection-token")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr))
             .spawn()?,
         ConnectRuntime::Docker => {
             let container = docker_container_name("benthos");
@@ -397,8 +405,8 @@ fn start_benthos(
                     "run",
                     "/config/events.yaml",
                 ])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
+                .stdout(Stdio::from(stdout))
+                .stderr(Stdio::from(stderr))
                 .spawn()?;
             docker_container = Some(container);
             child
@@ -408,21 +416,76 @@ fn start_benthos(
         child,
         _temp_dir: None,
         docker_container,
+        log_path: Some(log_path),
     })
+}
+
+fn connect_diagnostics(process: &mut ChildProcess) -> String {
+    let status = process.child.try_wait();
+    let log = process
+        .log_path
+        .as_ref()
+        .and_then(|path| fs::read_to_string(path).ok())
+        .unwrap_or_else(|| "<no Connect log>".to_owned());
+    format!("Connect status: {status:?}; log:\n{log}")
+}
+
+async fn wait_for_connect(process: &mut ChildProcess, port: u16) -> TestResult {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while Instant::now() < deadline {
+        if process.child.try_wait()?.is_some() {
+            return Err(format!(
+                "Connect exited before readiness: {}",
+                connect_diagnostics(process)
+            )
+            .into());
+        }
+        let ready = tokio::time::timeout(Duration::from_millis(500), async {
+            let mut socket = TcpStream::connect(("127.0.0.1", port)).await?;
+            socket
+                .write_all(b"GET /ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+                .await?;
+            let mut bytes = Vec::new();
+            socket.read_to_end(&mut bytes).await?;
+            Ok::<_, std::io::Error>(bytes.starts_with(b"HTTP/1.1 200"))
+        })
+        .await;
+        if matches!(ready, Ok(Ok(true))) {
+            return Ok(());
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
+    Err(format!(
+        "Connect did not become ready: {}",
+        connect_diagnostics(process)
+    )
+    .into())
 }
 
 async fn wait_for_user_row(
     store: &dyn ReadModelStore,
     aggregate_id: &str,
+    process: &mut ChildProcess,
 ) -> Result<serde_json::Value, Box<dyn Error + Send + Sync>> {
     for _ in 0..60 {
+        if process.child.try_wait()?.is_some() {
+            return Err(format!(
+                "Connect exited while projecting: {}",
+                connect_diagnostics(process)
+            )
+            .into());
+        }
         if let Some(row) = store.get(USERS_VIEW, aggregate_id).await? {
             return Ok(row);
         }
         sleep(Duration::from_millis(100)).await;
     }
 
-    Err("timed out waiting for projected users_view row".into())
+    Err(format!(
+        "timed out waiting for projected users_view row: {}",
+        connect_diagnostics(process)
+    )
+    .into())
 }
 
 #[tokio::test]
@@ -454,29 +517,34 @@ async fn benthos_routes_nats_event_to_arc_projection_handler() -> TestResult {
     let event_store = InMemoryEventStore::new();
     let (projection_url, projection_handle) =
         start_projection_app(event_store.clone(), read_model_store.clone()).await?;
-    let benthos_http_port = free_port()?;
-    let config_dir = generate_benthos_config(&projection_url, benthos_http_port)?;
+    let outcome: TestResult = async {
+        let benthos_http_port = free_port()?;
+        let config_dir = generate_benthos_config(&projection_url, benthos_http_port)?;
 
-    let stream = stream_name();
-    let bus = NatsEventBus::new(&nats_url, &stream).await?;
-    let _benthos = start_benthos(&runtime, &config_dir, &nats_url, &stream)?;
-    sleep(Duration::from_millis(500)).await;
+        let stream = stream_name();
+        let bus = NatsEventBus::new(&nats_url, &stream).await?;
+        let mut benthos = start_benthos(&runtime, &config_dir, &nats_url, &stream)?;
+        wait_for_connect(&mut benthos, benthos_http_port).await?;
 
-    let event = user_registered("user-benthos-projection");
-    event_store
-        .append_to(
-            "User",
-            &event.aggregate_id,
-            VersionCheck::New,
-            vec![event.clone()],
-        )
-        .await?;
-    bus.publish(vec![event.clone()]).await?;
+        let event = user_registered("user-benthos-projection");
+        event_store
+            .append_to(
+                "User",
+                &event.aggregate_id,
+                VersionCheck::New,
+                vec![event.clone()],
+            )
+            .await?;
+        bus.publish(vec![event.clone()]).await?;
 
-    let row = wait_for_user_row(read_model_store.as_ref(), &event.aggregate_id).await?;
-    assert_eq!(row["email"], "ada@example.test");
-    assert_eq!(row["version"], 1);
+        let row =
+            wait_for_user_row(read_model_store.as_ref(), &event.aggregate_id, &mut benthos).await?;
+        assert_eq!(row["email"], "ada@example.test");
+        assert_eq!(row["version"], 1);
 
+        Ok(())
+    }
+    .await;
     projection_handle.stop(true).await;
-    Ok(())
+    outcome
 }

@@ -1,3 +1,11 @@
+/// Rate limits identify the connected socket peer. Forwarding headers are
+/// client-controlled unless a separately configured trusted proxy verifies them.
+pub fn client_ip(req: &actix_web::HttpRequest) -> String {
+    req.peer_addr()
+        .map(|peer| peer.ip().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
 use std::collections::HashMap;
 use std::env;
 use std::sync::{Arc, Mutex};

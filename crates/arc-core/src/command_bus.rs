@@ -197,6 +197,7 @@ pub struct CommandBus<A: Aggregate> {
     event_store: Box<dyn EventStore>,
     event_bus: Box<dyn EventBus>,
     snapshot_policy: SnapshotPolicy,
+    durable_publication: bool,
     _phantom: PhantomData<A>,
 }
 
@@ -208,6 +209,7 @@ impl<A: Aggregate> CommandBus<A> {
             // Off by default: a freshly constructed bus behaves exactly as it did
             // before snapshots existed.
             snapshot_policy: SnapshotPolicy::Disabled,
+            durable_publication: false,
             _phantom: PhantomData,
         }
     }
@@ -217,6 +219,17 @@ impl<A: Aggregate> CommandBus<A> {
     pub fn with_snapshot_policy(mut self, policy: SnapshotPolicy) -> Self {
         self.snapshot_policy = policy;
         self
+    }
+
+    /// Queue publication atomically with append. Once committed, a carrier
+    /// failure leaves recoverable work and does not report the command as failed.
+    /// The runtime must schedule `publication::relay_pending_publications`.
+    pub fn with_durable_publication(mut self) -> Result<Self, EventStoreError> {
+        if !self.event_store.supports_durable_publication() {
+            return Err(EventStoreError::Unsupported);
+        }
+        self.durable_publication = true;
+        Ok(self)
     }
 
     /// Reconstruct an aggregate by replaying its entire stream from sequence 0.
@@ -335,27 +348,55 @@ impl<A: Aggregate> CommandBus<A> {
             VersionCheck::Expected(current_version)
         };
 
-        self.event_store
-            .append_to(
-                A::aggregate_type(),
-                &aggregate_id,
-                version_check,
-                new_events.clone(),
-            )
-            .await
-            .map_err(|source| CommandBusError::AppendFailed {
-                aggregate_id: aggregate_id.clone(),
-                source,
-            })?;
+        let append = if self.durable_publication {
+            self.event_store
+                .append_to_with_publication(
+                    A::aggregate_type(),
+                    &aggregate_id,
+                    version_check,
+                    new_events.clone(),
+                )
+                .await
+        } else {
+            self.event_store
+                .append_to(
+                    A::aggregate_type(),
+                    &aggregate_id,
+                    version_check,
+                    new_events.clone(),
+                )
+                .await
+        };
+        append.map_err(|source| CommandBusError::AppendFailed {
+            aggregate_id: aggregate_id.clone(),
+            source,
+        })?;
 
         // Step 6: Publish
-        self.event_bus
-            .publish(new_events.clone())
-            .await
-            .map_err(|source| CommandBusError::PublishFailed {
+        let publication = self.event_bus.publish(new_events.clone()).await;
+        if self.durable_publication {
+            match publication {
+                Ok(()) => {
+                    for event in &new_events {
+                        if let Err(error) = self
+                            .event_store
+                            .acknowledge_publication(event.event_id)
+                            .await
+                        {
+                            tracing::warn!(%error, event_id = %event.event_id, "publication ack marker retained for retry");
+                        }
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(%error, %aggregate_id, "committed events queued for publication retry")
+                }
+            }
+        } else {
+            publication.map_err(|source| CommandBusError::PublishFailed {
                 aggregate_id: aggregate_id.clone(),
                 source,
             })?;
+        }
 
         // Step 7: Snapshot (best-effort cache write). The command's events are
         // already durably appended and published; the snapshot is a rebuildable
@@ -488,6 +529,18 @@ mod tests {
 
     fn ctx() -> CommandContext {
         CommandContext::for_actor("test-actor")
+    }
+
+    #[test]
+    fn durable_publication_rejects_unsupported_custom_store() {
+        let bus = CommandBus::<CounterAggregate>::new(
+            Box::new(InMemoryEventStore::new()),
+            Box::new(InProcessEventBus::new()),
+        );
+        assert!(matches!(
+            bus.with_durable_publication(),
+            Err(EventStoreError::Unsupported)
+        ));
     }
 
     #[tokio::test]
