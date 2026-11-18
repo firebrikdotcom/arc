@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+
+- `arc-es-postgres`: optional in-transaction write guard. `PostgresEventStore::with_write_guard`
+  installs a `WriteGuard` whose `check` runs as the first statement of every write
+  transaction (appends, publication acknowledgements, snapshot saves) on the same
+  connection, so its locks are held until Arc commits and a refusal persists nothing.
+  Additive: without a guard behaviour is unchanged. With a guard, publication
+  acknowledgements and snapshot saves run in an explicit transaction instead of a single
+  auto-commit statement. PostgreSQL only; `arc-core` and `arc-es-sqlite` are unchanged.
+
 ## 0.9.1 — 2026-11-06
 
 All fourteen reusable crates are published to crates.io.

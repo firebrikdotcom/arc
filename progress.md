@@ -29,6 +29,15 @@ observability, and developer experience.
 This is the canonical project-status and roadmap tracker. Current source code and accepted ADRs
 take precedence when a claim here becomes stale.
 
+## PostgreSQL write guard — unreleased — 2026-11-17
+
+- `arc-es-postgres` gains an additive, optional `WriteGuard`
+  (`PostgresEventStore::with_write_guard`) that runs first inside every event-store write
+  transaction; default behaviour, schema and the 0.9.1 version are unchanged. Implemented on
+  `feature/postgres-write-guard`, not yet released. Verified locally with unit tests and
+  live PostgreSQL 16 tests (once-per-write, rejection persists nothing, same transaction,
+  lock held to commit, connection hygiene); live tests do not run in CI.
+
 ## Security, delivery and verification follow-up — 0.9.1 published — 2026-11-06
 
 - Fixes cover static-path traversal, cross-account password confirmation, forwarding-header

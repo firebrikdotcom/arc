@@ -18,6 +18,8 @@ It is intended for production deployments and multi-process Arc applications.
   signatures. Historical JSONB normalization may already have invalidated some
   signatures; those events fail closed and must not be resealed.
 - Optional HMAC integrity-chain enforcement for persisted events.
+- Optional `WriteGuard`: an application check that runs inside every event-store
+  write transaction (see [Write Guard](#write-guard)).
 
 ## Example
 
@@ -54,6 +56,68 @@ Use `PostgresEventStore::new_with_integrity_key` or
 `PostgresEventStore::with_pool_and_integrity_key` to sign new events and verify events on
 load/stream. Existing unsigned data must be replayed or migrated before enabling integrity
 verification.
+
+## Write Guard
+
+`PostgresEventStore::with_write_guard` installs a `WriteGuard` that makes every write
+conditional on database state your application owns, atomically with the write. It chains
+after any constructor; calling it again replaces the guard, and clones share it. Without a
+guard the store behaves exactly as before.
+
+```rust
+use arc_core::event_store::{EventStoreError, EventStoreResult};
+use arc_es_postgres::{PostgresEventStore, WriteGuard};
+use async_trait::async_trait;
+use std::sync::Arc;
+
+/// Refuses writes once another process has advanced the writer epoch.
+struct EpochGuard {
+    epoch: i64,
+}
+
+#[async_trait]
+impl WriteGuard for EpochGuard {
+    async fn check(&self, conn: &mut sqlx::PgConnection) -> EventStoreResult<()> {
+        // FOR SHARE: concurrent writers do not block each other, but the epoch
+        // cannot be advanced until this write has committed or rolled back.
+        let current: i64 =
+            sqlx::query_scalar("SELECT epoch FROM writer_epoch WHERE id = 1 FOR SHARE")
+                .fetch_one(&mut *conn)
+                .await
+                .map_err(|e| EventStoreError::database(e.to_string()))?;
+        if current != self.epoch {
+            return Err(EventStoreError::other("writer epoch superseded"));
+        }
+        Ok(())
+    }
+}
+
+# async fn example() -> Result<(), Box<dyn std::error::Error>> {
+let store = PostgresEventStore::new("postgres://arc:password@localhost:5432/arc")
+    .await?
+    .with_write_guard(Arc::new(EpochGuard { epoch: 7 }));
+# Ok(())
+# }
+```
+
+Semantics:
+
+- The guard runs once per write transaction: once per `append`, `append_to` or
+  `append_to_with_publication` call regardless of event count, once per
+  `acknowledge_publication`, and once per `save_snapshot`.
+- It is not called for empty batches or batches rejected by audit validation (no
+  transaction is opened), for reads, or for `initialize_schema`.
+  `PostgresReadModelStore` is not guarded.
+- It is the first statement after `BEGIN` on the write's own connection. Locks it takes are
+  held until Arc commits or rolls back, and anything it writes commits or rolls back with
+  the write.
+- On `Err` nothing is persisted and the guard's error is returned unchanged. A guard
+  failure takes precedence over `ConcurrencyConflict` and `InvalidSequence`.
+- With a guard installed, publication acknowledgements and snapshot saves run in an
+  explicit transaction (guard, statement, commit) rather than one auto-commit statement.
+- A guard must not commit, roll back, issue `SET TRANSACTION`, or leave session state
+  changed. It should avoid returning `ConcurrencyConflict`, which callers may treat as
+  retryable. It runs under the pooled connection's own timeouts; Arc adds none.
 
 ## Stability
 

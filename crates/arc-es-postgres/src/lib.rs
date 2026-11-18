@@ -212,11 +212,78 @@ impl EventRow {
     }
 }
 
+/// A check that runs inside every write transaction of a
+/// [`PostgresEventStore`], installed with
+/// [`PostgresEventStore::with_write_guard`].
+///
+/// A guard lets an application make each event-store write conditional on
+/// database state that Arc does not own, atomically with the write itself. A
+/// typical use is a fencing check: the guard reads an application-owned epoch
+/// row `FOR SHARE` and refuses the write when this process is no longer the
+/// current writer, while the row lock keeps the epoch from advancing until the
+/// write has committed.
+///
+/// # When it runs
+///
+/// The guard runs exactly once per write transaction:
+///
+/// - once per `append`, `append_to` or `append_to_with_publication` call,
+///   regardless of how many events the batch holds;
+/// - once per `acknowledge_publication` call;
+/// - once per `save_snapshot` call.
+///
+/// It is **not** called for an empty append batch, for a batch rejected by
+/// audit-metadata validation (both return before any transaction is opened),
+/// for any read (`load*`, `stream_all`, `get_*version`, `pending_publications`,
+/// `load_snapshot*`), or for `initialize_schema`.
+///
+/// # Transaction semantics
+///
+/// `check` receives the connection of the write transaction and is the first
+/// statement after `BEGIN`, before Arc reads the stream version. Therefore:
+///
+/// - locks the guard takes are held until Arc commits or rolls back the write;
+/// - anything the guard writes commits or rolls back together with the write;
+/// - a guard failure takes precedence over
+///   [`EventStoreError::ConcurrencyConflict`] and
+///   [`EventStoreError::InvalidSequence`], which are detected later.
+///
+/// When `check` returns `Err`, Arc rolls the transaction back, persists
+/// nothing, and returns the guard's error to the caller unchanged.
+///
+/// With a guard installed, `acknowledge_publication` and `save_snapshot` run
+/// in an explicit transaction (guard, statement, commit) instead of a single
+/// auto-commit statement. Without a guard they are unchanged.
+///
+/// # Rules for implementations
+///
+/// - Do not commit or roll back the transaction, and do not issue
+///   `SET TRANSACTION`.
+/// - Do not leave session state changed (for example `SET` without `LOCAL`,
+///   session advisory locks, or temporary objects): the connection returns to
+///   the pool afterwards.
+/// - Avoid returning [`EventStoreError::ConcurrencyConflict`]; callers may
+///   treat it as a retryable optimistic-concurrency failure.
+/// - The guard runs under the pooled connection's own timeouts
+///   (`statement_timeout`, `lock_timeout`, ...); Arc adds none. A guard that
+///   blocks holds a pooled connection and delays the write.
+///
+/// # Scope
+///
+/// This is a PostgreSQL-only extension. The `arc-core` `EventStore` trait and
+/// `arc-es-sqlite` are unchanged, and `PostgresReadModelStore` is not guarded.
+#[async_trait]
+pub trait WriteGuard: Send + Sync + 'static {
+    /// Decide whether the write transaction on `conn` may proceed.
+    async fn check(&self, conn: &mut sqlx::PgConnection) -> EventStoreResult<()>;
+}
+
 /// Postgres implementation of [`EventStore`].
 #[derive(Clone)]
 pub struct PostgresEventStore {
     pool: PgPool,
     integrity: Option<Arc<IntegrityConfig>>,
+    write_guard: Option<Arc<dyn WriteGuard>>,
 }
 
 struct IntegrityConfig {
@@ -225,6 +292,33 @@ struct IntegrityConfig {
 }
 
 impl PostgresEventStore {
+    /// Install a [`WriteGuard`] that runs first inside every write transaction
+    /// (appends, publication acknowledgements and snapshot saves). Chains after
+    /// any constructor; calling it again replaces the previous guard. Clones of
+    /// the store share the same guard.
+    pub fn with_write_guard(mut self, guard: Arc<dyn WriteGuard>) -> Self {
+        self.write_guard = Some(guard);
+        self
+    }
+
+    /// Begin a write transaction and run the write guard, if any, as its first
+    /// statement. A guard error rolls the transaction back and is returned
+    /// unchanged.
+    async fn begin_write(&self) -> EventStoreResult<sqlx::Transaction<'static, sqlx::Postgres>> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| EventStoreError::database(e.to_string()))?;
+        if let Some(guard) = self.write_guard.as_ref() {
+            if let Err(error) = guard.check(&mut tx).await {
+                let _ = tx.rollback().await;
+                return Err(error);
+            }
+        }
+        Ok(tx)
+    }
+
     async fn append_internal(
         &self,
         aggregate_type: &str,
@@ -240,11 +334,7 @@ impl PostgresEventStore {
         // Defense-in-depth: reject any event with invalid audit before touching the DB.
         validate_audit_batch(aggregate_id, &new_events)?;
 
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| EventStoreError::database(e.to_string()))?;
+        let mut tx = self.begin_write().await?;
 
         let current_version: i64 = sqlx::query(
             "SELECT COALESCE(MAX(sequence), 0) AS v FROM events
@@ -364,6 +454,7 @@ impl PostgresEventStore {
         Ok(PostgresEventStore {
             pool,
             integrity: None,
+            write_guard: None,
         })
     }
 
@@ -384,6 +475,7 @@ impl PostgresEventStore {
                 chain: Arc::new(HmacSha256Chain::new(key).map_err(EventStoreError::from)?),
                 key_id: key_id.into(),
             })),
+            write_guard: None,
         })
     }
 
@@ -393,6 +485,7 @@ impl PostgresEventStore {
         PostgresEventStore {
             pool,
             integrity: None,
+            write_guard: None,
         }
     }
 
@@ -408,6 +501,7 @@ impl PostgresEventStore {
                 chain: Arc::new(HmacSha256Chain::new(key).map_err(EventStoreError::from)?),
                 key_id: key_id.into(),
             })),
+            write_guard: None,
         })
     }
 
@@ -688,9 +782,21 @@ impl EventStore for PostgresEventStore {
     }
 
     async fn acknowledge_publication(&self, event_id: Uuid) -> EventStoreResult<()> {
-        sqlx::query("DELETE FROM event_publications WHERE event_id = $1")
-            .bind(event_id.to_string())
-            .execute(&self.pool)
+        let query = sqlx::query("DELETE FROM event_publications WHERE event_id = $1")
+            .bind(event_id.to_string());
+        if self.write_guard.is_none() {
+            query
+                .execute(&self.pool)
+                .await
+                .map_err(|e| EventStoreError::database(e.to_string()))?;
+            return Ok(());
+        }
+        let mut tx = self.begin_write().await?;
+        query
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| EventStoreError::database(e.to_string()))?;
+        tx.commit()
             .await
             .map_err(|e| EventStoreError::database(e.to_string()))?;
         Ok(())
@@ -914,7 +1020,7 @@ impl EventStore for PostgresEventStore {
     async fn save_snapshot(&self, snapshot: &Snapshot) -> EventStoreResult<()> {
         // One snapshot per aggregate: replace in place rather than accumulating
         // stale versions.
-        sqlx::query(
+        let query = sqlx::query(
             r#"INSERT INTO snapshots (aggregate_id, aggregate_type, version, state, created_at)
                VALUES ($1, $2, $3, $4, $5)
                ON CONFLICT (aggregate_type, aggregate_id) DO UPDATE
@@ -926,10 +1032,22 @@ impl EventStore for PostgresEventStore {
         .bind(&snapshot.aggregate_type)
         .bind(snapshot.version)
         .bind(&snapshot.state)
-        .bind(snapshot.created_at as i64)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| EventStoreError::database(e.to_string()))?;
+        .bind(snapshot.created_at as i64);
+        if self.write_guard.is_none() {
+            query
+                .execute(&self.pool)
+                .await
+                .map_err(|e| EventStoreError::database(e.to_string()))?;
+            return Ok(());
+        }
+        let mut tx = self.begin_write().await?;
+        query
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| EventStoreError::database(e.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|e| EventStoreError::database(e.to_string()))?;
         Ok(())
     }
 
@@ -1956,5 +2074,691 @@ mod tests {
 
         let loaded = store.stream_all(0).await.unwrap();
         assert_eq!(loaded.len(), 3);
+    }
+
+    // ---- Write guard -------------------------------------------------------
+
+    const GUARD_SCRATCH: &str = "arc_write_guard_scratch";
+
+    struct CountingGuard(Arc<AtomicUsize>);
+
+    #[async_trait]
+    impl WriteGuard for CountingGuard {
+        async fn check(&self, _conn: &mut sqlx::PgConnection) -> EventStoreResult<()> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    /// Refuses while `refuse` is set; counts every invocation.
+    struct SwitchGuard {
+        refuse: std::sync::atomic::AtomicBool,
+        calls: AtomicUsize,
+    }
+
+    impl SwitchGuard {
+        fn new(refuse: bool) -> Arc<Self> {
+            Arc::new(Self {
+                refuse: std::sync::atomic::AtomicBool::new(refuse),
+                calls: AtomicUsize::new(0),
+            })
+        }
+    }
+
+    #[async_trait]
+    impl WriteGuard for SwitchGuard {
+        async fn check(&self, _conn: &mut sqlx::PgConnection) -> EventStoreResult<()> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            if self.refuse.load(Ordering::SeqCst) {
+                Err(EventStoreError::other("guard refused"))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    /// Records the guard's transaction id and optionally writes a marker row.
+    struct TxidGuard {
+        txids: std::sync::Mutex<Vec<i64>>,
+        insert_marker: bool,
+    }
+
+    #[async_trait]
+    impl WriteGuard for TxidGuard {
+        async fn check(&self, conn: &mut sqlx::PgConnection) -> EventStoreResult<()> {
+            let txid: i64 = sqlx::query_scalar("SELECT txid_current()")
+                .fetch_one(&mut *conn)
+                .await
+                .map_err(|e| EventStoreError::database(e.to_string()))?;
+            self.txids.lock().unwrap().push(txid);
+            if self.insert_marker {
+                sqlx::query(&format!(
+                    "INSERT INTO {GUARD_SCRATCH} (id, epoch) VALUES (99, 0)"
+                ))
+                .execute(&mut *conn)
+                .await
+                .map_err(|e| EventStoreError::database(e.to_string()))?;
+            }
+            Ok(())
+        }
+    }
+
+    /// Share-locks the scratch row, signals, then waits to be released.
+    struct LockingGuard {
+        locked: tokio::sync::mpsc::UnboundedSender<()>,
+        release: tokio::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<()>>,
+    }
+
+    #[async_trait]
+    impl WriteGuard for LockingGuard {
+        async fn check(&self, conn: &mut sqlx::PgConnection) -> EventStoreResult<()> {
+            sqlx::query(&format!(
+                "SELECT epoch FROM {GUARD_SCRATCH} WHERE id = 1 FOR SHARE"
+            ))
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(|e| EventStoreError::database(e.to_string()))?;
+            self.locked.send(()).unwrap();
+            self.release.lock().await.recv().await;
+            Ok(())
+        }
+    }
+
+    fn assert_guard_refused(result: EventStoreResult<()>) {
+        match result {
+            Err(EventStoreError::Other { message }) => assert_eq!(message, "guard refused"),
+            other => panic!("expected the guard's own error, got {other:?}"),
+        }
+    }
+
+    fn lazy_pool() -> PgPool {
+        PgPoolOptions::new()
+            .connect_lazy("postgres://arc:arc@127.0.0.1:1/arc_unreachable")
+            .unwrap()
+    }
+
+    async fn create_guard_scratch(pool: &PgPool) {
+        sqlx::raw_sql(&format!(
+            "DROP TABLE IF EXISTS {GUARD_SCRATCH};
+             CREATE TABLE {GUARD_SCRATCH} (id INT PRIMARY KEY, epoch BIGINT NOT NULL);
+             INSERT INTO {GUARD_SCRATCH} (id, epoch) VALUES (1, 1);"
+        ))
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn drop_guard_scratch(pool: &PgPool) {
+        sqlx::raw_sql(&format!("DROP TABLE IF EXISTS {GUARD_SCRATCH}"))
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    async fn count_rows(pool: &PgPool, table: &str) -> i64 {
+        sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn write_guard_builder_composes_after_constructors_and_clone_shares_guard() {
+        let plain = PostgresEventStore::with_pool(lazy_pool());
+        assert!(plain.write_guard.is_none());
+
+        let first: Arc<dyn WriteGuard> = Arc::new(CountingGuard(Arc::new(AtomicUsize::new(0))));
+        let second: Arc<dyn WriteGuard> = Arc::new(CountingGuard(Arc::new(AtomicUsize::new(0))));
+
+        let store = plain.with_write_guard(first.clone());
+        assert!(Arc::ptr_eq(store.write_guard.as_ref().unwrap(), &first));
+        assert!(store.integrity.is_none());
+        let cloned = store.clone();
+        assert!(Arc::ptr_eq(cloned.write_guard.as_ref().unwrap(), &first));
+
+        // A second call replaces the guard.
+        let replaced = store.with_write_guard(second.clone());
+        assert!(Arc::ptr_eq(replaced.write_guard.as_ref().unwrap(), &second));
+
+        let signed =
+            PostgresEventStore::with_pool_and_integrity_key(lazy_pool(), integrity_key(), "k")
+                .unwrap();
+        assert!(signed.write_guard.is_none());
+        let signed = signed.with_write_guard(first.clone());
+        assert!(signed.integrity.is_some());
+        assert!(Arc::ptr_eq(signed.write_guard.as_ref().unwrap(), &first));
+    }
+
+    #[tokio::test]
+    async fn write_guard_not_invoked_for_empty_batch_or_invalid_audit() {
+        let count = Arc::new(AtomicUsize::new(0));
+        let store = PostgresEventStore::with_pool(lazy_pool())
+            .with_write_guard(Arc::new(CountingGuard(count.clone())));
+
+        store
+            .append("empty", VersionCheck::New, Vec::new())
+            .await
+            .unwrap();
+        store
+            .append_to("User", "empty", VersionCheck::New, Vec::new())
+            .await
+            .unwrap();
+        store
+            .append_to_with_publication("User", "empty", VersionCheck::New, Vec::new())
+            .await
+            .unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+
+        // Built without with_audit: audit stays pending and is rejected before
+        // any transaction (the lazy pool is unreachable).
+        let unaudited = Event::new(NewEvent {
+            aggregate_type: "User",
+            aggregate_id: "bad",
+            sequence: 1,
+            event_type: "Created",
+            payload: json!({}),
+        });
+        let err = store
+            .append("bad", VersionCheck::New, vec![unaudited])
+            .await
+            .unwrap_err();
+        assert!(matches!(err, EventStoreError::InvalidAudit { .. }));
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_live_write_guard_runs_once_per_write_and_never_for_reads() {
+        let Some(base) = setup_test_store().await else {
+            return;
+        };
+        let count = Arc::new(AtomicUsize::new(0));
+        let store = base
+            .clone()
+            .with_write_guard(Arc::new(CountingGuard(count.clone())));
+
+        store
+            .append(
+                "g1",
+                VersionCheck::New,
+                vec![
+                    stamped_event("User", "g1", 1, "Created", json!({})),
+                    stamped_event("User", "g1", 2, "Renamed", json!({})),
+                ],
+            )
+            .await
+            .unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+
+        let published = stamped_event("User", "g1", 3, "Published", json!({}));
+        store
+            .append_to_with_publication(
+                "User",
+                "g1",
+                VersionCheck::Expected(2),
+                vec![published.clone()],
+            )
+            .await
+            .unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+        assert_eq!(count_rows(base.pool(), "event_publications").await, 1);
+
+        store
+            .acknowledge_publication(published.event_id)
+            .await
+            .unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 3);
+
+        store
+            .save_snapshot(&Snapshot::new("g1", "User", 3, json!({"n": 3})))
+            .await
+            .unwrap();
+        assert_eq!(count.load(Ordering::SeqCst), 4);
+
+        // Everything persisted.
+        assert_eq!(count_rows(base.pool(), "events").await, 3);
+        assert_eq!(count_rows(base.pool(), "event_publications").await, 0);
+        assert_eq!(count_rows(base.pool(), "snapshots").await, 1);
+
+        // Reads never invoke the guard.
+        assert_eq!(store.load("g1").await.unwrap().len(), 3);
+        assert_eq!(store.load_stream("User", "g1").await.unwrap().len(), 3);
+        assert!(store.load_event("User", "g1", 2).await.unwrap().is_some());
+        assert_eq!(store.load_from("g1", 2).await.unwrap().len(), 2);
+        assert_eq!(
+            store.load_stream_from("User", "g1", 3).await.unwrap().len(),
+            1
+        );
+        assert_eq!(store.stream_all(0).await.unwrap().len(), 3);
+        assert_eq!(store.get_version("g1").await.unwrap(), 3);
+        assert_eq!(store.get_stream_version("User", "g1").await.unwrap(), 3);
+        assert!(store
+            .pending_publications("User", 10)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(store.load_snapshot("g1").await.unwrap().unwrap().version, 3);
+        assert_eq!(
+            store
+                .load_snapshot_for("User", "g1")
+                .await
+                .unwrap()
+                .unwrap()
+                .version,
+            3
+        );
+        assert_eq!(count.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_live_write_guard_rejection_persists_nothing_and_returns_guard_error() {
+        let Some(base) = setup_test_store().await else {
+            return;
+        };
+        let pool = base.pool().clone();
+
+        // Seed through an unguarded store on the same pool.
+        let seeded = stamped_event("User", "r1", 1, "Created", json!({}));
+        base.append_to_with_publication("User", "r1", VersionCheck::New, vec![seeded.clone()])
+            .await
+            .unwrap();
+        base.save_snapshot(&Snapshot::new("r1", "User", 1, json!({"v": 1})))
+            .await
+            .unwrap();
+
+        async fn assert_unchanged(base: &PostgresEventStore, seeded: &Event) {
+            assert_eq!(count_rows(base.pool(), "events").await, 1);
+            assert_eq!(count_rows(base.pool(), "event_publications").await, 1);
+            let pending: String = sqlx::query_scalar("SELECT event_id FROM event_publications")
+                .fetch_one(base.pool())
+                .await
+                .unwrap();
+            assert_eq!(pending, seeded.event_id.to_string());
+            let snapshot = base.load_snapshot_for("User", "r1").await.unwrap().unwrap();
+            assert_eq!(snapshot.version, 1);
+            assert_eq!(snapshot.state, json!({"v": 1}));
+        }
+
+        let guard = SwitchGuard::new(true);
+        let store = PostgresEventStore::with_pool(pool.clone()).with_write_guard(guard.clone());
+
+        assert_guard_refused(
+            store
+                .append(
+                    "r1",
+                    VersionCheck::Expected(1),
+                    vec![stamped_event("User", "r1", 2, "Renamed", json!({}))],
+                )
+                .await,
+        );
+        assert_unchanged(&base, &seeded).await;
+
+        assert_guard_refused(
+            store
+                .append_to(
+                    "User",
+                    "r2",
+                    VersionCheck::New,
+                    vec![stamped_event("User", "r2", 1, "Created", json!({}))],
+                )
+                .await,
+        );
+        assert_unchanged(&base, &seeded).await;
+
+        assert_guard_refused(
+            store
+                .append_to_with_publication(
+                    "User",
+                    "r3",
+                    VersionCheck::New,
+                    vec![stamped_event("User", "r3", 1, "Created", json!({}))],
+                )
+                .await,
+        );
+        assert_unchanged(&base, &seeded).await;
+
+        assert_guard_refused(store.acknowledge_publication(seeded.event_id).await);
+        assert_unchanged(&base, &seeded).await;
+
+        assert_guard_refused(
+            store
+                .save_snapshot(&Snapshot::new("r1", "User", 2, json!({"v": 2})))
+                .await,
+        );
+        assert_unchanged(&base, &seeded).await;
+        assert_eq!(guard.calls.load(Ordering::SeqCst), 5);
+
+        // Guard failure wins over the later concurrency check.
+        assert_guard_refused(
+            store
+                .append(
+                    "r1",
+                    VersionCheck::Expected(7),
+                    vec![stamped_event("User", "r1", 8, "Renamed", json!({}))],
+                )
+                .await,
+        );
+        assert_unchanged(&base, &seeded).await;
+
+        // Same for the integrity-enabled store.
+        let signed_guard = SwitchGuard::new(true);
+        let signed = PostgresEventStore::with_pool_and_integrity_key(pool, integrity_key(), "k")
+            .unwrap()
+            .with_write_guard(signed_guard.clone());
+        assert_guard_refused(
+            signed
+                .append(
+                    "r4",
+                    VersionCheck::New,
+                    vec![stamped_event("User", "r4", 1, "Created", json!({}))],
+                )
+                .await,
+        );
+        assert_eq!(signed_guard.calls.load(Ordering::SeqCst), 1);
+        assert_unchanged(&base, &seeded).await;
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_live_write_guard_shares_the_write_transaction() {
+        let Some(base) = setup_test_store().await else {
+            return;
+        };
+        let pool = base.pool().clone();
+        create_guard_scratch(&pool).await;
+
+        let guard = Arc::new(TxidGuard {
+            txids: std::sync::Mutex::new(Vec::new()),
+            insert_marker: false,
+        });
+        let store = base.clone().with_write_guard(guard.clone());
+
+        store
+            .append(
+                "t1",
+                VersionCheck::New,
+                vec![stamped_event("User", "t1", 1, "Created", json!({}))],
+            )
+            .await
+            .unwrap();
+        let event_xmin: i64 =
+            sqlx::query_scalar("SELECT xmin::text::bigint FROM events WHERE aggregate_id = 't1'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        store
+            .save_snapshot(&Snapshot::new("t1", "User", 1, json!({})))
+            .await
+            .unwrap();
+        // Upsert path: the replaced row version is written by the guard's tx too.
+        store
+            .save_snapshot(&Snapshot::new("t1", "User", 1, json!({"again": true})))
+            .await
+            .unwrap();
+        let snapshot_xmin: i64 = sqlx::query_scalar(
+            "SELECT xmin::text::bigint FROM snapshots WHERE aggregate_id = 't1'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let txids = guard.txids.lock().unwrap().clone();
+        assert_eq!(txids.len(), 3);
+        // xmin is the 32-bit xid; txid_current() carries the epoch in the high bits.
+        assert_eq!(event_xmin, txids[0] & 0xFFFF_FFFF);
+        assert_eq!(snapshot_xmin, txids[2] & 0xFFFF_FFFF);
+        assert_ne!(txids[0], txids[1]);
+        assert_ne!(txids[1], txids[2]);
+
+        // What the guard writes rolls back with a failed write.
+        let marking = Arc::new(TxidGuard {
+            txids: std::sync::Mutex::new(Vec::new()),
+            insert_marker: true,
+        });
+        let marking_store = base.clone().with_write_guard(marking.clone());
+        let err = marking_store
+            .append(
+                "t1",
+                VersionCheck::Expected(5),
+                vec![stamped_event("User", "t1", 6, "Renamed", json!({}))],
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, EventStoreError::ConcurrencyConflict { .. }));
+        assert_eq!(marking.txids.lock().unwrap().len(), 1);
+        let markers: i64 = sqlx::query_scalar(&format!(
+            "SELECT COUNT(*) FROM {GUARD_SCRATCH} WHERE id = 99"
+        ))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(markers, 0);
+
+        // ...and commits with a successful one.
+        marking_store
+            .append(
+                "t1",
+                VersionCheck::Expected(1),
+                vec![stamped_event("User", "t1", 2, "Renamed", json!({}))],
+            )
+            .await
+            .unwrap();
+        let markers: i64 = sqlx::query_scalar(&format!(
+            "SELECT COUNT(*) FROM {GUARD_SCRATCH} WHERE id = 99"
+        ))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(markers, 1);
+
+        drop_guard_scratch(&pool).await;
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_live_write_guard_lock_is_held_until_commit() {
+        use sqlx::Connection;
+        use std::time::Duration;
+
+        let Some(base) = setup_test_store().await else {
+            return;
+        };
+        let url = env::var("ARC_POSTGRES_TEST_DATABASE_URL").unwrap();
+        let pool = base.pool().clone();
+        create_guard_scratch(&pool).await;
+
+        let (locked_tx, mut locked_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (release_tx, release_rx) = tokio::sync::mpsc::unbounded_channel();
+        let store = base.clone().with_write_guard(Arc::new(LockingGuard {
+            locked: locked_tx,
+            release: tokio::sync::Mutex::new(release_rx),
+        }));
+
+        let append = tokio::spawn(async move {
+            store
+                .append(
+                    "l1",
+                    VersionCheck::New,
+                    vec![stamped_event("User", "l1", 1, "Created", json!({}))],
+                )
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(10), locked_rx.recv())
+            .await
+            .expect("guard never took its lock")
+            .unwrap();
+
+        // While the guard's transaction is open, a writer of the row is blocked.
+        let mut impatient = sqlx::PgConnection::connect(&url).await.unwrap();
+        sqlx::query("SET lock_timeout = '200ms'")
+            .execute(&mut impatient)
+            .await
+            .unwrap();
+        let blocked = sqlx::query(&format!(
+            "UPDATE {GUARD_SCRATCH} SET epoch = epoch + 1 WHERE id = 1"
+        ))
+        .execute(&mut impatient)
+        .await
+        .unwrap_err();
+        assert_eq!(
+            blocked
+                .as_database_error()
+                .and_then(|e| e.code())
+                .as_deref(),
+            Some("55P03")
+        );
+        impatient.close().await.unwrap();
+        assert!(!append.is_finished());
+
+        // A patient updater queues behind the guard's lock.
+        let mut patient = sqlx::PgConnection::connect(&url).await.unwrap();
+        let updater = tokio::spawn(async move {
+            let mut tx = patient.begin().await.unwrap();
+            sqlx::query(&format!(
+                "UPDATE {GUARD_SCRATCH} SET epoch = epoch + 1 WHERE id = 1"
+            ))
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+            let visible: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM events WHERE aggregate_id = 'l1'")
+                    .fetch_one(&mut *tx)
+                    .await
+                    .unwrap();
+            tx.commit().await.unwrap();
+            patient.close().await.unwrap();
+            visible
+        });
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            !updater.is_finished(),
+            "updater was not blocked by the guard"
+        );
+        assert_eq!(count_rows(&pool, "events").await, 0);
+
+        release_tx.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(10), append)
+            .await
+            .expect("append did not finish")
+            .unwrap()
+            .unwrap();
+        // The updater could only proceed after the append committed, so it
+        // sees the event.
+        let visible = tokio::time::timeout(Duration::from_secs(10), updater)
+            .await
+            .expect("updater did not finish")
+            .unwrap();
+        assert_eq!(visible, 1);
+        let epoch: i64 =
+            sqlx::query_scalar(&format!("SELECT epoch FROM {GUARD_SCRATCH} WHERE id = 1"))
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(epoch, 2);
+
+        drop_guard_scratch(&pool).await;
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_live_write_guard_failure_leaves_the_connection_clean() {
+        use std::time::Duration;
+
+        let Some(base) = setup_test_store().await else {
+            return;
+        };
+        base.pool().close().await;
+        drop(base);
+
+        // One connection: a leaked transaction or lock would stall the next write.
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .acquire_timeout(Duration::from_secs(5))
+            .connect(&env::var("ARC_POSTGRES_TEST_DATABASE_URL").unwrap())
+            .await
+            .unwrap();
+        create_guard_scratch(&pool).await;
+
+        // The refusing guard takes a row lock before failing.
+        struct LockThenSwitch(Arc<SwitchGuard>);
+        #[async_trait]
+        impl WriteGuard for LockThenSwitch {
+            async fn check(&self, conn: &mut sqlx::PgConnection) -> EventStoreResult<()> {
+                sqlx::query(&format!(
+                    "SELECT epoch FROM {GUARD_SCRATCH} WHERE id = 1 FOR UPDATE"
+                ))
+                .fetch_one(&mut *conn)
+                .await
+                .map_err(|e| EventStoreError::database(e.to_string()))?;
+                self.0.check(conn).await
+            }
+        }
+
+        let switch = SwitchGuard::new(true);
+        let unguarded = PostgresEventStore::with_pool(pool.clone());
+        let guarded = unguarded
+            .clone()
+            .with_write_guard(Arc::new(LockThenSwitch(switch.clone())));
+
+        assert_guard_refused(
+            guarded
+                .append(
+                    "h1",
+                    VersionCheck::New,
+                    vec![stamped_event("User", "h1", 1, "Created", json!({}))],
+                )
+                .await,
+        );
+        assert_guard_refused(guarded.acknowledge_publication(Uuid::new_v4()).await);
+        assert_guard_refused(
+            guarded
+                .save_snapshot(&Snapshot::new("h1", "User", 1, json!({})))
+                .await,
+        );
+
+        // The single connection is back, idle and outside any transaction.
+        let in_tx: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pg_locks WHERE pid = pg_backend_pid() AND locktype = 'transactionid'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(in_tx, 0);
+
+        unguarded
+            .append(
+                "h1",
+                VersionCheck::New,
+                vec![stamped_event("User", "h1", 1, "Created", json!({}))],
+            )
+            .await
+            .unwrap();
+        sqlx::query(&format!(
+            "UPDATE {GUARD_SCRATCH} SET epoch = epoch + 1 WHERE id = 1"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        switch.refuse.store(false, Ordering::SeqCst);
+        guarded
+            .append(
+                "h1",
+                VersionCheck::Expected(1),
+                vec![stamped_event("User", "h1", 2, "Renamed", json!({}))],
+            )
+            .await
+            .unwrap();
+        guarded
+            .save_snapshot(&Snapshot::new("h1", "User", 2, json!({})))
+            .await
+            .unwrap();
+        assert_eq!(unguarded.load("h1").await.unwrap().len(), 2);
+        assert_eq!(switch.calls.load(Ordering::SeqCst), 5);
+
+        drop_guard_scratch(&pool).await;
+        pool.close().await;
     }
 }
