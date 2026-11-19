@@ -4,6 +4,8 @@
 
 ## 0.9.2 — 2026-11-19
 
+All fourteen reusable crates are published to crates.io.
+
 ### Added
 
 - `arc-es-postgres`: optional in-transaction write guard. `PostgresEventStore::with_write_guard`
