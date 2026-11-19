@@ -2,8 +2,9 @@
 
 **Last updated:** 2026-11-06
 **Current development version:** 0.9.2
-**Latest published version:** 0.9.1
-**Status:** All fourteen 0.9.1 packages are published to crates.io with the security,
+**Latest published version:** 0.9.2
+**Status:** All fourteen 0.9.2 packages are published to crates.io (2026-11-19) with the
+`arc-es-postgres` write guard and patched Actix dependencies, on top of the 0.9.1 security,
 delivery and verification fixes below. v0.9.0 is the Phase 2 release: WebSocket and
 projection security hardening (breaking; see [Upgrading](docs/upgrading.md)), the
 headless `arc-stack` and native `arc-ffi` adapters (first published in this release),
