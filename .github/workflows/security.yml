@@ -34,11 +34,26 @@ jobs:
         # h2 is pulled in by Actix Web; the patched 0.4 line is not API-compatible
         # with Actix's current 0.3 dependency. rsa is an inactive optional sqlx MySQL
         # dependency retained in Cargo.lock; Arc enables only Postgres and SQLite.
-        # Keep both exceptions explicit so a new advisory continues to fail the build.
+        # libsqlite3-sys (RUSTSEC-2026-0459) is patched from 0.39.0, but sqlx-sqlite
+        # 0.8.6 requires ^0.30.1 and Cargo allows one libsqlite3-sys per lockfile.
+        # sqlx 0.8 keeps sqlx-sqlite in Cargo.lock even where only Postgres is
+        # enabled, so the fix needs sqlx 0.9 in every crate, including
+        # arc-es-postgres, whose public API exposes sqlx 0.8 pool and connection
+        # types to applications pinned to this release. Remove this exception with
+        # that coordinated sqlx 0.9 migration. Diesel already accepts the patched
+        # line. chrono, chrono-tz and chrono-tz-build (RUSTSEC-2026-0543, -0555,
+        # -0559) are unmaintained notices with no fixed release; chrono is used
+        # directly and by sqlx, and the chrono-tz pair comes from Tera 1's built-in
+        # date filter, which has no chrono-free 1.x release.
+        # Keep every exception explicit so a new advisory continues to fail the build.
         run: >-
           cargo audit --deny warnings
           --ignore RUSTSEC-2026-0258
           --ignore RUSTSEC-2023-0071
+          --ignore RUSTSEC-2026-0459
+          --ignore RUSTSEC-2026-0543
+          --ignore RUSTSEC-2026-0555
+          --ignore RUSTSEC-2026-0559
 
       - name: Upload audit results
         if: failure()

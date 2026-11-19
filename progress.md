@@ -1,7 +1,7 @@
 # Arc Project Progress
 
 **Last updated:** 2026-11-06
-**Current development version:** 0.9.1
+**Current development version:** 0.9.2
 **Latest published version:** 0.9.1
 **Status:** All fourteen 0.9.1 packages are published to crates.io with the security,
 delivery and verification fixes below. v0.9.0 is the Phase 2 release: WebSocket and
@@ -28,6 +28,15 @@ observability, and developer experience.
 
 This is the canonical project-status and roadmap tracker. Current source code and accepted ADRs
 take precedence when a claim here becomes stale.
+
+## PostgreSQL write guard — 0.9.2 — 2026-11-19
+
+- `arc-es-postgres` gains an additive, optional `WriteGuard`
+  (`PostgresEventStore::with_write_guard`) that runs first inside every event-store write
+  transaction; default behaviour and schema are unchanged. Released as 0.9.2 together
+  with patched Actix dependencies (see the changelog). Verified locally with unit tests and
+  live PostgreSQL 16 tests (once-per-write, rejection persists nothing, same transaction,
+  lock held to commit, connection hygiene); live tests do not run in CI.
 
 ## Security, delivery and verification follow-up — 0.9.1 published — 2026-11-06
 

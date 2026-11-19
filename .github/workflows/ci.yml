@@ -304,7 +304,9 @@ jobs:
 
   bounded-collections:
     name: Bounded Collection Storage and Browser Regression
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04, which the locked Playwright
+    # release cannot install Chromium on.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -320,7 +322,9 @@ jobs:
 
   durable-audit:
     name: Durable Access Audit Restart Regression
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04, which the locked Playwright
+    # release cannot install Chromium on.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -336,7 +340,9 @@ jobs:
 
   security-session:
     name: Security Session Browser Suite
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04, which the locked Playwright
+    # release cannot install Chromium on.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
