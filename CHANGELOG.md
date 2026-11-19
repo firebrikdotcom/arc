@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.2 — 2026-11-19
+
 ### Added
 
 - `arc-es-postgres`: optional in-transaction write guard. `PostgresEventStore::with_write_guard`
@@ -11,6 +13,15 @@
   Additive: without a guard behaviour is unchanged. With a guard, publication
   acknowledgements and snapshot saves run in an explicit transaction instead of a single
   auto-commit statement. PostgreSQL only; `arc-core` and `arc-es-sqlite` are unchanged.
+
+### Security
+
+- Upgrade `actix-web` to 4.20, `actix-http` to 3.22 and `actix-files` to 0.7 (workspace
+  requirement `0.7.4`), clearing the RustSec advisories against the earlier releases.
+  Applications that also depend on `actix-files` directly should move to 0.7.
+- `libsqlite3-sys` RUSTSEC-2026-0459 remains open: the patched line needs sqlx 0.9 in every
+  crate, which changes the public pool and connection types of the storage adapters. It is an
+  explicit `cargo audit` exception until that migration.
 
 ## 0.9.1 — 2026-11-06
 

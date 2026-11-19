@@ -465,7 +465,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "arc"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "actix",
  "actix-files",
@@ -509,7 +509,7 @@ dependencies = [
 
 [[package]]
 name = "arc-auth-admin"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "actix-session 0.10.1",
  "actix-web",
@@ -523,7 +523,7 @@ dependencies = [
 
 [[package]]
 name = "arc-auth-core"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "arc-core",
  "async-trait",
@@ -533,7 +533,7 @@ dependencies = [
 
 [[package]]
 name = "arc-auth-db"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "arc-auth-core",
  "arc-web",
@@ -548,7 +548,7 @@ dependencies = [
 
 [[package]]
 name = "arc-auth-jwt"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "actix-web",
  "arc-auth-core",
@@ -561,7 +561,7 @@ dependencies = [
 
 [[package]]
 name = "arc-auth-rbac"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "actix",
  "actix-session 0.10.1",
@@ -581,7 +581,7 @@ dependencies = [
 
 [[package]]
 name = "arc-auth-session"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "actix-session 0.10.1",
  "actix-web",
@@ -595,7 +595,7 @@ dependencies = [
 
 [[package]]
 name = "arc-core"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "async-trait",
  "hmac",
@@ -610,7 +610,7 @@ dependencies = [
 
 [[package]]
 name = "arc-es-nats"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "arc-core",
  "async-nats",
@@ -623,7 +623,7 @@ dependencies = [
 
 [[package]]
 name = "arc-es-postgres"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "arc-core",
  "async-trait",
@@ -639,7 +639,7 @@ dependencies = [
 
 [[package]]
 name = "arc-es-sqlite"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "arc-core",
  "async-trait",
@@ -654,7 +654,7 @@ dependencies = [
 
 [[package]]
 name = "arc-ffi"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "arc-core",
  "arc-stack",
@@ -671,7 +671,7 @@ dependencies = [
 
 [[package]]
 name = "arc-stack"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "arc-core",
  "arc-es-postgres",
@@ -694,7 +694,7 @@ dependencies = [
 
 [[package]]
 name = "arc-web"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "actix",
  "actix-files",
@@ -738,7 +738,7 @@ dependencies = [
 
 [[package]]
 name = "arc-web-cli"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "serde",
  "serde_json",
