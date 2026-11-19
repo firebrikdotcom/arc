@@ -1,0 +1,72 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="A check that runs inside every write transaction of a `PostgresEventStore`, installed with `PostgresEventStore::with_write_guard`."><title>WriteGuard in arc_es_postgres - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="arc_es_postgres" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="sidebar-items.js"></script><script defer src="../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc trait"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">WriteGuard</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../arc_es_postgres/index.html">arc_<wbr>es_<wbr>postgres</a><span class="version">0.9.2</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Write<wbr>Guard</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#when-it-runs" title="When it runs">When it runs</a></li><li><a href="#transaction-semantics" title="Transaction semantics">Transaction semantics</a></li><li><a href="#rules-for-implementations" title="Rules for implementations">Rules for implementations</a></li><li><a href="#scope" title="Scope">Scope</a></li></ul><h3><a href="#required-methods">Required Methods</a></h3><ul class="block"><li><a href="#tymethod.check" title="check">check</a></li></ul><h3><a href="#implementors">Implementors</a></h3></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="index.html">In crate arc_<wbr>es_<wbr>postgres</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="index.html">arc_es_postgres</a></div><h1>Trait <span class="trait">Write<wbr>Guard</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/arc_es_postgres/lib.rs.html#276-279">Source</a> </span></div><pre class="rust item-decl"><code>pub trait WriteGuard:
+    <a class="trait" href="https://doc.rust-lang.org/1.100.0/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a>
+    + <a class="trait" href="https://doc.rust-lang.org/1.100.0/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a>
+    + 'static {
+    // Required method
+    fn <a href="#tymethod.check" class="fn">check</a>&lt;'life0, 'life1, 'async_trait&gt;(
+        &amp;'life0 self,
+        conn: &amp;'life1 mut PgConnection,
+    ) -&gt; <a class="struct" href="https://doc.rust-lang.org/1.100.0/core/pin/struct.Pin.html" title="struct core::pin::Pin">Pin</a>&lt;<a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/boxed/struct.Box.html" title="struct alloc::boxed::Box">Box</a>&lt;dyn <a class="trait" href="https://doc.rust-lang.org/1.100.0/core/future/future/trait.Future.html" title="trait core::future::future::Future">Future</a>&lt;Output = EventStoreResult&lt;<a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.unit.html">()</a>&gt;&gt; + <a class="trait" href="https://doc.rust-lang.org/1.100.0/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + 'async_trait&gt;&gt;
+       <span class="where">where Self: 'async_trait,
+             'life0: 'async_trait,
+             'life1: 'async_trait</span>;
+}</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>A check that runs inside every write transaction of a
+<a href="struct.PostgresEventStore.html" title="struct arc_es_postgres::PostgresEventStore"><code>PostgresEventStore</code></a>, installed with
+<a href="struct.PostgresEventStore.html#method.with_write_guard" title="method arc_es_postgres::PostgresEventStore::with_write_guard"><code>PostgresEventStore::with_write_guard</code></a>.</p>
+<p>A guard lets an application make each event-store write conditional on
+database state that Arc does not own, atomically with the write itself. A
+typical use is a fencing check: the guard reads an application-owned epoch
+row <code>FOR SHARE</code> and refuses the write when this process is no longer the
+current writer, while the row lock keeps the epoch from advancing until the
+write has committed.</p>
+<h2 id="when-it-runs"><a class="doc-anchor" href="#when-it-runs">§</a>When it runs</h2>
+<p>The guard runs exactly once per write transaction:</p>
+<ul>
+<li>once per <code>append</code>, <code>append_to</code> or <code>append_to_with_publication</code> call,
+regardless of how many events the batch holds;</li>
+<li>once per <code>acknowledge_publication</code> call;</li>
+<li>once per <code>save_snapshot</code> call.</li>
+</ul>
+<p>It is <strong>not</strong> called for an empty append batch, for a batch rejected by
+audit-metadata validation (both return before any transaction is opened),
+for any read (<code>load*</code>, <code>stream_all</code>, <code>get_*version</code>, <code>pending_publications</code>,
+<code>load_snapshot*</code>), or for <code>initialize_schema</code>.</p>
+<h2 id="transaction-semantics"><a class="doc-anchor" href="#transaction-semantics">§</a>Transaction semantics</h2>
+<p><code>check</code> receives the connection of the write transaction and is the first
+statement after <code>BEGIN</code>, before Arc reads the stream version. Therefore:</p>
+<ul>
+<li>locks the guard takes are held until Arc commits or rolls back the write;</li>
+<li>anything the guard writes commits or rolls back together with the write;</li>
+<li>a guard failure takes precedence over
+[<code>EventStoreError::ConcurrencyConflict</code>] and
+[<code>EventStoreError::InvalidSequence</code>], which are detected later.</li>
+</ul>
+<p>When <code>check</code> returns <code>Err</code>, Arc rolls the transaction back, persists
+nothing, and returns the guard’s error to the caller unchanged.</p>
+<p>With a guard installed, <code>acknowledge_publication</code> and <code>save_snapshot</code> run
+in an explicit transaction (guard, statement, commit) instead of a single
+auto-commit statement. Without a guard they are unchanged.</p>
+<h2 id="rules-for-implementations"><a class="doc-anchor" href="#rules-for-implementations">§</a>Rules for implementations</h2>
+<ul>
+<li>Do not commit or roll back the transaction, and do not issue
+<code>SET TRANSACTION</code>.</li>
+<li>Do not leave session state changed (for example <code>SET</code> without <code>LOCAL</code>,
+session advisory locks, or temporary objects): the connection returns to
+the pool afterwards.</li>
+<li>Avoid returning [<code>EventStoreError::ConcurrencyConflict</code>]; callers may
+treat it as a retryable optimistic-concurrency failure.</li>
+<li>The guard runs under the pooled connection’s own timeouts
+(<code>statement_timeout</code>, <code>lock_timeout</code>, …); Arc adds none. A guard that
+blocks holds a pooled connection and delays the write.</li>
+</ul>
+<h2 id="scope"><a class="doc-anchor" href="#scope">§</a>Scope</h2>
+<p>This is a PostgreSQL-only extension. The <code>arc-core</code> <code>EventStore</code> trait and
+<code>arc-es-sqlite</code> are unchanged, and <code>PostgresReadModelStore</code> is not guarded.</p>
+</div></details><h2 id="required-methods" class="section-header">Required Methods<a href="#required-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="tymethod.check" class="method"><a class="src rightside" href="../src/arc_es_postgres/lib.rs.html#278">Source</a><h4 class="code-header">fn <a href="#tymethod.check" class="fn">check</a>&lt;'life0, 'life1, 'async_trait&gt;(
+    &amp;'life0 self,
+    conn: &amp;'life1 mut PgConnection,
+) -&gt; <a class="struct" href="https://doc.rust-lang.org/1.100.0/core/pin/struct.Pin.html" title="struct core::pin::Pin">Pin</a>&lt;<a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/boxed/struct.Box.html" title="struct alloc::boxed::Box">Box</a>&lt;dyn <a class="trait" href="https://doc.rust-lang.org/1.100.0/core/future/future/trait.Future.html" title="trait core::future::future::Future">Future</a>&lt;Output = EventStoreResult&lt;<a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.unit.html">()</a>&gt;&gt; + <a class="trait" href="https://doc.rust-lang.org/1.100.0/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + 'async_trait&gt;&gt;<div class="where">where
+    Self: 'async_trait,
+    'life0: 'async_trait,
+    'life1: 'async_trait,</div></h4></section></summary><div class="docblock"><p>Decide whether the write transaction on <code>conn</code> may proceed.</p>
+</div></details></div><h2 id="dyn-compatibility" class="section-header">Dyn Compatibility<a href="#dyn-compatibility" class="anchor">§</a></h2><div class="dyn-compatibility-info"><p>This trait <b>is</b> <a href="https://doc.rust-lang.org/1.100.0/reference/items/traits.html#dyn-compatibility">dyn compatible</a>.</p><p><i>In older versions of Rust, dyn compatibility was called "object safety".</i></p></div><h2 id="implementors" class="section-header">Implementors<a href="#implementors" class="anchor">§</a></h2><div id="implementors-list"></div><script src="../trait.impl/arc_es_postgres/trait.WriteGuard.js" async></script></section></div></main></body></html>

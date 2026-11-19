@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["IMPORT","REGISTER"],"fn":["add_plugin","dependency","migrate_auth_ui","protect_admin_dashboard","remove_duplicate_registration"]};

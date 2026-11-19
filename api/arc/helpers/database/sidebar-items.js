@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["MIGRATIONS"],"fn":["get_connection","get_connection_pool","reset_pool"]};
