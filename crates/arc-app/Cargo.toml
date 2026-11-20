@@ -79,7 +79,6 @@ chrono.workspace = true
 uuid.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
-sqlx = { version = "0.8.6", default-features = false, features = ["sqlite", "runtime-tokio-rustls"] }
 
 [dev-dependencies]
 serial_test.workspace = true

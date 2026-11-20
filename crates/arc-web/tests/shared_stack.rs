@@ -104,24 +104,18 @@ async fn request(port: u16, method: &str, id: &str) -> String {
 
 async fn create_stack(path: &std::path::Path) -> SharedStack<Item> {
     let url = path.to_str().unwrap();
-    let pool = sqlx::sqlite::SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect_with(
-            sqlx::sqlite::SqliteConnectOptions::new()
-                .filename(path)
-                .create_if_missing(true),
-        )
-        .await
-        .unwrap();
-    sqlx::query("CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, aggregate_type TEXT NOT NULL, aggregate_id TEXT NOT NULL, sequence BIGINT NOT NULL, event_type TEXT NOT NULL, payload TEXT NOT NULL, timestamp BIGINT NOT NULL, actor_id TEXT NOT NULL, actor_session_id TEXT, source_ip TEXT, user_agent TEXT, timestamp_utc_us BIGINT NOT NULL, causation_id TEXT, correlation_id TEXT NOT NULL, integrity_signature TEXT, integrity_key_id TEXT, UNIQUE(aggregate_type, aggregate_id, sequence))").execute(&pool).await.unwrap();
-    sqlx::query("CREATE TABLE snapshots (aggregate_type TEXT NOT NULL, aggregate_id TEXT NOT NULL, version BIGINT NOT NULL, state TEXT NOT NULL, created_at BIGINT NOT NULL, PRIMARY KEY(aggregate_type, aggregate_id))").execute(&pool).await.unwrap();
-    sqlx::query(
-        "CREATE TABLE items (id TEXT PRIMARY KEY, data TEXT NOT NULL, version BIGINT NOT NULL)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-    pool.close().await;
+    {
+        use diesel::connection::SimpleConnection as _;
+        use diesel::Connection as _;
+        let mut db = diesel::SqliteConnection::establish(url).unwrap();
+        for statement in [
+            "CREATE TABLE events (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, aggregate_type TEXT NOT NULL, aggregate_id TEXT NOT NULL, sequence BIGINT NOT NULL, event_type TEXT NOT NULL, payload TEXT NOT NULL, timestamp BIGINT NOT NULL, actor_id TEXT NOT NULL, actor_session_id TEXT, source_ip TEXT, user_agent TEXT, timestamp_utc_us BIGINT NOT NULL, causation_id TEXT, correlation_id TEXT NOT NULL, integrity_signature TEXT, integrity_key_id TEXT, UNIQUE(aggregate_type, aggregate_id, sequence))",
+            "CREATE TABLE snapshots (aggregate_type TEXT NOT NULL, aggregate_id TEXT NOT NULL, version BIGINT NOT NULL, state TEXT NOT NULL, created_at BIGINT NOT NULL, PRIMARY KEY(aggregate_type, aggregate_id))",
+            "CREATE TABLE items (id TEXT PRIMARY KEY, data TEXT NOT NULL, version BIGINT NOT NULL)",
+        ] {
+            db.batch_execute(statement).unwrap();
+        }
+    }
 
     let stack: SharedStack<Item> = es_stack::build_with_driver(
         DatabaseDriver::Sqlite,

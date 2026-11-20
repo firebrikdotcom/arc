@@ -15,7 +15,8 @@ categories = ["database", "asynchronous"]
 arc-core = { path = "../arc-core", version = "0.9.2" }
 
 # Database
-sqlx.workspace = true
+sqlx-core.workspace = true
+sqlx-postgres.workspace = true
 
 # Core event sourcing dependencies
 uuid.workspace = true

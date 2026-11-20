@@ -78,17 +78,10 @@ async fn shared_bus_projects_immediately_across_os_threads_and_replay_is_explici
     for outcome in outcomes {
         outcome.unwrap();
     }
-    let db = sqlx::SqlitePool::connect(key.sqlite_path().unwrap().to_str().unwrap())
-        .await
-        .unwrap();
     for table in ["events", "items"] {
-        let total: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
-            .fetch_one(&db)
-            .await
-            .unwrap();
+        let total = support::count(key.sqlite_path().unwrap().to_str().unwrap(), table);
         assert_eq!(total, (WORKERS * PER_WORKER) as i64);
     }
-    db.close().await;
     assert_eq!(
         count.load(Ordering::SeqCst),
         WORKERS * PER_WORKER,
@@ -191,7 +184,7 @@ async fn post_commit_projection_lock_failure_requires_replay_without_redispatch(
     use std::sync::atomic::AtomicBool;
 
     struct LockedProjection {
-        external: sqlx::SqlitePool,
+        external: std::sync::Mutex<diesel::SqliteConnection>,
         once: AtomicBool,
     }
     #[async_trait::async_trait]
@@ -205,20 +198,24 @@ async fn post_commit_projection_lock_failure_requires_replay_without_redispatch(
         async fn apply(&self, event: &Event, store: &dyn ReadModelStore) -> ProjectionResult<()> {
             // This callback runs only after append committed. Hold an independent
             // writer lock until the real projection store exhausts its timeout.
-            let mut external = self.external.acquire().await.unwrap();
+            // The guard is released between statements; the transaction, and with it
+            // the writer lock, belongs to the connection.
+            use diesel::connection::SimpleConnection as _;
             let lock = self.once.swap(false, Ordering::SeqCst);
             if lock {
-                sqlx::query("BEGIN IMMEDIATE")
-                    .execute(&mut *external)
-                    .await
+                self.external
+                    .lock()
+                    .unwrap()
+                    .batch_execute("BEGIN IMMEDIATE")
                     .unwrap();
             }
             let outcome = store.upsert(Upsert::new("items", &event.aggregate_id,
                 serde_json::json!({"id": event.aggregate_id, "version": event.sequence, "data": "visible"}))).await;
             if lock {
-                sqlx::query("ROLLBACK")
-                    .execute(&mut *external)
-                    .await
+                self.external
+                    .lock()
+                    .unwrap()
+                    .batch_execute("ROLLBACK")
                     .unwrap();
             }
             outcome.map_err(|error| ProjectionError::ReadModelError {
@@ -232,11 +229,12 @@ async fn post_commit_projection_lock_failure_requires_replay_without_redispatch(
     support::schema(key.sqlite_path().unwrap().to_str().unwrap())
         .await
         .unwrap();
-    let db = sqlx::SqlitePool::connect(key.sqlite_path().unwrap().to_str().unwrap())
-        .await
-        .unwrap();
+    let path = key.sqlite_path().unwrap().to_str().unwrap().to_owned();
+    let external = {
+        use diesel::Connection as _;
+        std::sync::Mutex::new(diesel::SqliteConnection::establish(&path).unwrap())
+    };
     let registry = CoreRegistry::new(FfiRuntime::new().unwrap());
-    let external = db.clone();
     let core = registry
         .open::<Example, _, _>(key, "lock-fixture".into(), move |key| async move {
             arc_ffi::build_stack(
@@ -273,14 +271,8 @@ async fn post_commit_projection_lock_failure_requires_replay_without_redispatch(
         "{error:?}"
     );
     assert!(error.to_string().contains("locked"), "{error:?}");
-    let events: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM events")
-        .fetch_one(&db)
-        .await
-        .unwrap();
-    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM items")
-        .fetch_one(&db)
-        .await
-        .unwrap();
+    let events = support::count(&path, "events");
+    let rows = support::count(&path, "items");
     assert_eq!(
         (events, rows),
         (1, 0),
@@ -296,10 +288,6 @@ async fn post_commit_projection_lock_failure_requires_replay_without_redispatch(
     })
     .await
     .unwrap();
-    let events: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM events")
-        .fetch_one(&db)
-        .await
-        .unwrap();
+    let events = support::count(&path, "events");
     assert_eq!(events, 1, "replay never redispatches a committed command");
-    db.close().await;
 }

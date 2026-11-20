@@ -47,7 +47,13 @@ tracing-actix-web = "0.7"
 # Database
 diesel = { version = "2.2.6", features = ["sqlite", "returning_clauses_for_sqlite_3_35", "r2d2"] }
 diesel_migrations = "2.2.0"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "json"] }
+# Postgres driver, taken from the two crates the `sqlx` 0.8 facade re-exports rather than
+# from the facade itself: the facade keeps its optional MySQL and SQLite drivers in
+# Cargo.lock even when they are disabled, and sqlx-sqlite 0.8 pins a vulnerable
+# libsqlite3-sys. The features below are what the facade's `runtime-tokio`, `tls-rustls`
+# and `json` enable. The types are the very ones `sqlx::PgPool` and friends name.
+sqlx-core = { version = "0.8.6", default-features = false, features = ["_rt-tokio", "_tls-rustls-ring-webpki", "json"] }
+sqlx-postgres = { version = "0.8.6", default-features = false, features = ["json"] }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

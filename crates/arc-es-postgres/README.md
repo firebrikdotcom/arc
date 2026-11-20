@@ -100,6 +100,12 @@ let store = PostgresEventStore::new("postgres://arc:password@localhost:5432/arc"
 # }
 ```
 
+The guard receives a `sqlx_postgres::PgConnection`, which is the type the `sqlx` 0.8 facade
+re-exports as `sqlx::PgConnection`; likewise `with_pool` takes the pool `sqlx::PgPool` names.
+An application may depend on `sqlx` 0.8 with the `postgres` feature, as above, or on
+`sqlx-core` and `sqlx-postgres` directly, which keeps the facade's unused MySQL and SQLite
+drivers out of its `Cargo.lock`.
+
 Semantics:
 
 - The guard runs once per write transaction: once per `append`, `append_to` or

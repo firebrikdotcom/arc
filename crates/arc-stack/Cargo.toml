@@ -23,4 +23,4 @@ tokio.workspace = true
 async-trait.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
-sqlx = { version = "0.8.6", default-features = false, features = ["sqlite", "runtime-tokio-rustls"] }
+diesel = { workspace = true, features = ["sqlite"] }

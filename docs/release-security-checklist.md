@@ -82,7 +82,8 @@ Do not start the shared reference stack or reuse another lane's volumes/ports.
 
 These commands do not yet prove all manual adversarial cases above. In particular, add failing
 regression cases when repairing TM-03; passing existing tests cannot close that finding.
-The current Security workflow explicitly ignores `RUSTSEC-2026-0258` and `RUSTSEC-2023-0071` in
+The current Security workflow explicitly ignores `RUSTSEC-2026-0258` (h2 through Actix) and the
+unmaintained notices `RUSTSEC-2026-0543`, `-0555` and `-0559` (chrono, chrono-tz) in
 `cargo audit --deny warnings`. Reassess exposure, owner and expiry rather than treating ignored
 advisories as fixed. CodeQL is configured for JavaScript; its success is not Rust analysis.
 Inspect individual required job conclusions, not only the summary job. No current advisory lookup
