@@ -40,7 +40,8 @@ jobs:
         # exception: Arc depends on sqlx-core and sqlx-postgres rather than the sqlx
         # facade, so the facade's optional MySQL and SQLite drivers are no longer in
         # Cargo.lock, and Diesel alone selects a patched libsqlite3-sys (>= 0.39).
-        # Do not reintroduce the sqlx facade in any workspace crate.
+        # Do not reintroduce the sqlx facade in any workspace crate; crates that need
+        # SQLite built from bundled source request libsqlite3-sys "bundled" directly.
         # Keep every exception explicit so a new advisory continues to fail the build.
         run: >-
           cargo audit --deny warnings

@@ -489,6 +489,7 @@ dependencies = [
  "futures",
  "futures-util",
  "jsonwebtoken",
+ "libsqlite3-sys",
  "md5",
  "once_cell",
  "rand 0.8.8",
@@ -660,6 +661,7 @@ dependencies = [
  "arc-stack",
  "async-trait",
  "diesel",
+ "libsqlite3-sys",
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
@@ -678,6 +680,7 @@ dependencies = [
  "arc-es-sqlite",
  "async-trait",
  "diesel",
+ "libsqlite3-sys",
  "serde_json",
  "tokio",
  "uuid",
@@ -718,6 +721,7 @@ dependencies = [
  "futures",
  "futures-util",
  "jsonwebtoken",
+ "libsqlite3-sys",
  "md5",
  "once_cell",
  "rand 0.8.8",
@@ -2312,6 +2316,7 @@ version = "0.40.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b06e69070b7e12262b0cd90832f0a7396f142a2b330181255562decf9f0c6215"
 dependencies = [
+ "cc",
  "pkg-config",
  "vcpkg",
 ]

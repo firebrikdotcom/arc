@@ -30,3 +30,4 @@ serde_json.workspace = true
 uuid.workspace = true
 tempfile = "3"
 diesel = { workspace = true, features = ["sqlite"] }
+libsqlite3-sys.workspace = true

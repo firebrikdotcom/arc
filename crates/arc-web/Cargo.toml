@@ -76,6 +76,7 @@ chrono.workspace = true
 uuid.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
+libsqlite3-sys.workspace = true
 
 [dev-dependencies]
 arc-core = { path = "../arc-core", version = "0.9.3", features = ["test-utils"] }
