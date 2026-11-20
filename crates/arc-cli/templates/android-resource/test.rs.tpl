@@ -41,11 +41,10 @@ async fn typed_crud_reopen_validation_and_persistence() {
     assert_eq!(ffi::get(&fresh, id.clone()).await.unwrap().version, 2);
     let stored = id.clone();
     let journal = fresh.run(move |_| async move {
-        use sqlx::Connection;
-        let options = sqlx::sqlite::SqliteConnectOptions::new().filename(path);
-        let mut db = sqlx::SqliteConnection::connect_with(&options).await.unwrap();
-        let journal: String = sqlx::query_scalar("PRAGMA journal_mode").fetch_one(&mut db).await.unwrap();
-        db.close().await.unwrap();
+        use diesel::{Connection as _, RunQueryDsl as _};
+        let mut db = diesel::SqliteConnection::establish(&path).unwrap();
+        let journal: String = diesel::dsl::sql::<diesel::sql_types::Text>("PRAGMA journal_mode").get_result(&mut db).unwrap();
+        drop(db);
         Ok::<_, {{Type}}ResourceError>(journal)
     }).await.unwrap();
     assert_eq!(journal, "delete");

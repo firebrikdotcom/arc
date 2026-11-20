@@ -24,6 +24,7 @@ commit both lockfiles. Subsequent Cargo commands use --locked. Bindgen is host-o
 Rust and generated Kotlin components load the same {{crate-name}} native library.
 
 Resources apply embedded SQL migrations once at core open under an IMMEDIATE transaction.
+rust/src/schema.rs does this with Diesel, and SQLite is compiled from bundled source (libsqlite3-sys "bundled").
 The app database is filesDir/app.sqlite. Existing data is retained; down migrations never run automatically.
 The managed .arc/android.json manifest records a SHA-256 hash of each resource's files and blocks (the skeleton hashes are an unchecked baseline),
 and named registration markers support resource generation. Editing one resource never blocks adding another,

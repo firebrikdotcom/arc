@@ -38,8 +38,15 @@ take precedence when a claim here becomes stale.
   RUSTSEC-2026-0459 and RUSTSEC-2023-0071 are removed. Public types are unchanged (the
   facade re-exports the same types); verified with an external consumer on the `sqlx` 0.8
   facade, the workspace tests and the live PostgreSQL 16 tests, which do not run in CI.
-- Open: the `arc new --android` template still uses the `sqlx` SQLite driver, so generated
-  Android projects resolve `libsqlite3-sys` 0.30 in their own lockfile.
+- The `arc new --android` template is ported from the `sqlx` SQLite driver to Diesel
+  (2026-11-20): generated `rust/src/schema.rs`, the resource test template and the
+  two-resource host test use Diesel, and the generated manifest requests `libsqlite3-sys`
+  `bundled` directly. A project generated against this checkout resolves `libsqlite3-sys`
+  0.40 and no `sqlx` crate, passes its host tests and `cargo audit --deny warnings`. Not
+  run locally: the Android cross-build and emulator checks (`scripts/check-android-scaffold.sh`),
+  which the Android Scaffold workflow runs. No other `arc new` template uses `sqlx`.
+- Open: Android projects generated before 0.9.3 keep the `sqlx` driver until moved by hand
+  (steps in the changelog); `arc` has no command that rewrites an existing skeleton file.
 
 ## PostgreSQL write guard — 0.9.2 — 2026-11-19
 
