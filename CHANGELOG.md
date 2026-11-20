@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.3 — 2026-11-19
+
 ### Security
 
 - `arc-es-postgres` depends on `sqlx-core` and `sqlx-postgres` 0.8 directly instead of the
