@@ -120,6 +120,32 @@ async fn existing_database_gains_second_resource_without_losing_data() {
     assert_eq!(core.get_tag(tag).await.unwrap().name, "tag");
     assert_eq!(retained(&path), "preserved");
 }
+// The initializer must also complete on an executor that is not a Tokio runtime.
+#[test]
+fn schema_initializes_without_a_tokio_runtime() {
+    use std::{future::Future, sync::Arc, task::{Context, Poll, Wake, Waker}};
+    struct Unpark(std::thread::Thread);
+    impl Wake for Unpark {
+        fn wake(self: Arc<Self>) { self.0.unpark(); }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("plain.sqlite").to_string_lossy().into_owned();
+    let waker = Waker::from(Arc::new(Unpark(std::thread::current())));
+    let mut context = Context::from_waker(&waker);
+    for _ in 0..2 {
+        let mut future = std::pin::pin!(schema::initialize(&path));
+        let result = loop {
+            match future.as_mut().poll(&mut context) {
+                Poll::Ready(result) => break result,
+                Poll::Pending => std::thread::park(),
+            }
+        };
+        result.unwrap();
+    }
+    let mut db = SqliteConnection::establish(&path).unwrap();
+    let applied: i64 = diesel::dsl::sql::<diesel::sql_types::BigInt>("SELECT COUNT(*) FROM arc_schema_migrations").get_result(&mut db).unwrap();
+    assert!(applied >= 1);
+}
 #[tokio::test]
 async fn failed_migration_preserves_existing_data() {
     let dir = tempfile::tempdir().unwrap();

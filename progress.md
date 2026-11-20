@@ -41,7 +41,8 @@ take precedence when a claim here becomes stale.
 - The `arc new --android` template is ported from the `sqlx` SQLite driver to Diesel
   (2026-11-20): generated `rust/src/schema.rs`, the resource test template and the
   two-resource host test use Diesel, and the generated manifest requests `libsqlite3-sys`
-  `bundled` directly. A project generated against this checkout resolves `libsqlite3-sys`
+  `bundled` directly. `schema::initialize` keeps its signature; its blocking work runs on
+  Tokio's blocking pool or, without a Tokio runtime, on a plain thread, and panics propagate. A project generated against this checkout resolves `libsqlite3-sys`
   0.40 and no `sqlx` crate, passes its host tests and `cargo audit --deny warnings`. Not
   run locally: the Android cross-build and emulator checks (`scripts/check-android-scaffold.sh`),
   which the Android Scaffold workflow runs. No other `arc new` template uses `sqlx`.
