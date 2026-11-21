@@ -33,6 +33,33 @@ pub(crate) fn rollback_append(conn: &mut SqliteConnection) {
     }
 }
 
+/// Run `body` as one write transaction for the holder of the file's write
+/// slot. The writer is reserved up front (`BEGIN IMMEDIATE`): a deferred
+/// read-to-write upgrade can fail immediately even with a busy timeout, and
+/// while this waits for a writer outside the process the stores' readers
+/// carry on. They are held back only for the commit itself. The body or
+/// commit error is preserved; COMMIT can fail (for example while an external
+/// reader holds a shared lock) and leave a transaction open.
+pub(crate) fn write_transaction<T, E>(
+    conn: &mut SqliteConnection,
+    permit: &crate::file_gate::WritePermit,
+    database_error: impl Fn(String) -> E,
+    body: impl FnOnce(&mut SqliteConnection) -> Result<T, E>,
+) -> Result<T, E> {
+    AnsiTransactionManager::begin_transaction_sql(conn, "BEGIN IMMEDIATE")
+        .map_err(|e| database_error(e.to_string()))?;
+    let result = body(conn).and_then(|value| {
+        permit.exclude_readers();
+        AnsiTransactionManager::commit_transaction(conn)
+            .map(|()| value)
+            .map_err(|e| database_error(e.to_string()))
+    });
+    if result.is_err() {
+        rollback_append(conn);
+    }
+    result
+}
+
 #[cfg(test)]
 pub(crate) fn assert_timeout_on_replacement(
     pool: &diesel::r2d2::Pool<diesel::r2d2::ConnectionManager<SqliteConnection>>,

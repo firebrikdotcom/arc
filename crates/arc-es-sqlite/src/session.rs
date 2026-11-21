@@ -65,6 +65,7 @@ type Pool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
 #[derive(Clone)]
 pub struct SqliteSessionStore {
     pool: Arc<Pool>,
+    gate: Arc<crate::file_gate::FileGate>,
 }
 
 impl SqliteSessionStore {
@@ -76,14 +77,42 @@ impl SqliteSessionStore {
             .map_err(|e| SessionStoreError::Sink(format!("failed to create pool: {e}")))?;
         Ok(Self {
             pool: Arc::new(pool),
+            gate: crate::file_gate::FileGate::new(),
         })
     }
 
     pub fn with_pool(pool: Pool) -> Self {
         Self {
             pool: Arc::new(pool),
+            gate: crate::file_gate::FileGate::new(),
         }
     }
+}
+
+/// Run a write as one transaction, after queueing fairly behind this
+/// process's other writers of the same database file.
+async fn run_write<F, T>(
+    pool: Arc<Pool>,
+    gate: Arc<crate::file_gate::FileGate>,
+    f: F,
+) -> Result<T, SessionStoreError>
+where
+    F: FnOnce(&mut SqliteConnection) -> Result<T, SessionStoreError> + Send + 'static,
+    T: Send + 'static,
+{
+    run_blocking(move || {
+        let permit = gate
+            .write(&pool)
+            .map_err(|e| SessionStoreError::Sink(e.to_string()))?;
+        let mut conn = pool
+            .get()
+            .map_err(|e| SessionStoreError::Sink(format!("conn: {e}")))?;
+        let result =
+            crate::connection::write_transaction(&mut conn, &permit, SessionStoreError::Sink, f);
+        permit.finish(&result);
+        result
+    })
+    .await
 }
 
 async fn run_blocking<F, T>(f: F) -> Result<T, SessionStoreError>
@@ -116,14 +145,12 @@ impl SessionStore for SqliteSessionStore {
             revoked_at_us: record.revoked_at_us,
         };
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
 
-        run_blocking(move || {
-            let mut conn = pool
-                .get()
-                .map_err(|e| SessionStoreError::Sink(format!("conn: {e}")))?;
+        run_write(pool, gate, move |conn| {
             diesel::insert_into(jwt_sessions::table)
                 .values(&row)
-                .execute(&mut conn)
+                .execute(conn)
                 .map_err(|e| SessionStoreError::Sink(e.to_string()))?;
             Ok(())
         })
@@ -133,11 +160,13 @@ impl SessionStore for SqliteSessionStore {
     async fn is_valid(&self, jti: Uuid, now_us: i64) -> Result<bool, SessionStoreError> {
         let key = jti.to_string();
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
 
         run_blocking(move || {
             let mut conn = pool
                 .get()
                 .map_err(|e| SessionStoreError::Sink(format!("conn: {e}")))?;
+            let _reading = gate.read(&mut conn);
             let row: Option<SessionRow> = jwt_sessions::table
                 .filter(jwt_sessions::jti.eq(&key))
                 .first(&mut conn)
@@ -157,14 +186,12 @@ impl SessionStore for SqliteSessionStore {
     async fn revoke(&self, jti: Uuid, now_us: i64) -> Result<(), SessionStoreError> {
         let key = jti.to_string();
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
 
-        run_blocking(move || {
-            let mut conn = pool
-                .get()
-                .map_err(|e| SessionStoreError::Sink(format!("conn: {e}")))?;
+        run_write(pool, gate, move |conn| {
             let n = diesel::update(jwt_sessions::table.filter(jwt_sessions::jti.eq(&key)))
                 .set(jwt_sessions::revoked_at_us.eq(Some(now_us)))
-                .execute(&mut conn)
+                .execute(conn)
                 .map_err(|e| SessionStoreError::Sink(e.to_string()))?;
             if n == 0 {
                 Err(SessionStoreError::NotFound(jti))
@@ -182,18 +209,16 @@ impl SessionStore for SqliteSessionStore {
     ) -> Result<usize, SessionStoreError> {
         let key = actor_id.to_string();
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
 
-        run_blocking(move || {
-            let mut conn = pool
-                .get()
-                .map_err(|e| SessionStoreError::Sink(format!("conn: {e}")))?;
+        run_write(pool, gate, move |conn| {
             let n = diesel::update(
                 jwt_sessions::table
                     .filter(jwt_sessions::actor_id.eq(&key))
                     .filter(jwt_sessions::revoked_at_us.is_null()),
             )
             .set(jwt_sessions::revoked_at_us.eq(Some(now_us)))
-            .execute(&mut conn)
+            .execute(conn)
             .map_err(|e| SessionStoreError::Sink(e.to_string()))?;
             Ok(n)
         })
@@ -202,14 +227,12 @@ impl SessionStore for SqliteSessionStore {
 
     async fn prune_expired(&self, now_us: i64) -> Result<usize, SessionStoreError> {
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
 
-        run_blocking(move || {
-            let mut conn = pool
-                .get()
-                .map_err(|e| SessionStoreError::Sink(format!("conn: {e}")))?;
+        run_write(pool, gate, move |conn| {
             let n =
                 diesel::delete(jwt_sessions::table.filter(jwt_sessions::expires_at_us.le(now_us)))
-                    .execute(&mut conn)
+                    .execute(conn)
                     .map_err(|e| SessionStoreError::Sink(e.to_string()))?;
             Ok(n)
         })

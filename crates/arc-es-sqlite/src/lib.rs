@@ -28,6 +28,7 @@ use uuid::Uuid;
 pub use arc_core::{Deserialize, Serialize};
 
 mod connection;
+mod file_gate;
 
 pub mod access_log;
 pub use access_log::{AccessLogPrivacy, SqliteAccessLogger};
@@ -258,6 +259,7 @@ type Pool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
 #[derive(Clone)]
 pub struct SqliteEventStore {
     pool: Arc<Pool>,
+    gate: Arc<file_gate::FileGate>,
     integrity: Option<Arc<IntegrityConfig>>,
 }
 
@@ -285,22 +287,29 @@ impl SqliteEventStore {
         let aggregate_type = aggregate_type.to_string();
         let aggregate_id = aggregate_id.to_string();
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
         let integrity = self.integrity.clone();
 
         tokio::task::spawn_blocking(move || -> EventStoreResult<()> {
             use diesel::connection::AnsiTransactionManager;
             use diesel::connection::TransactionManager;
 
+            // Queue fairly behind this process's other writers of the file;
+            // SQLite's own busy retry is left to contention from outside.
+            let permit = gate
+                .write(&pool)
+                .map_err(|e| EventStoreError::database(e.to_string()))?;
+
             let mut conn = pool.get().map_err(|e| {
                 EventStoreError::database(format!("Failed to get connection: {}", e))
             })?;
 
-            // Reserve the writer before reading the version: a deferred read-to-write
-            // upgrade can fail immediately even with a busy timeout.
-            AnsiTransactionManager::begin_transaction_sql(&mut *conn, "BEGIN IMMEDIATE")
-                .map_err(|e| EventStoreError::database(e.to_string()))?;
-
             let result = (|| -> EventStoreResult<()> {
+                // Reserve the writer before reading the version: a deferred read-to-write
+                // upgrade can fail immediately even with a busy timeout.
+                AnsiTransactionManager::begin_transaction_sql(&mut *conn, "BEGIN IMMEDIATE")
+                    .map_err(|e| EventStoreError::database(e.to_string()))?;
+
                 let current_version = events::table
                     .filter(events::aggregate_type.eq(&aggregate_type))
                     .filter(events::aggregate_id.eq(&aggregate_id))
@@ -373,12 +382,15 @@ impl SqliteEventStore {
             // Preserve the body/commit error. COMMIT can fail (for example while
             // an external reader holds a shared lock) and leave a transaction open.
             let result = result.and_then(|()| {
+                // Readers of this process are held back only for the commit.
+                permit.exclude_readers();
                 AnsiTransactionManager::commit_transaction(&mut *conn)
                     .map_err(|e| EventStoreError::database(e.to_string()))
             });
             if result.is_err() {
                 connection::rollback_append(&mut conn);
             }
+            permit.finish(&result);
             result
         })
         .await
@@ -395,6 +407,7 @@ impl SqliteEventStore {
 
         Ok(SqliteEventStore {
             pool: Arc::new(pool),
+            gate: file_gate::FileGate::new(),
             integrity: None,
         })
     }
@@ -417,6 +430,7 @@ impl SqliteEventStore {
     pub fn with_pool(pool: Pool) -> Self {
         SqliteEventStore {
             pool: Arc::new(pool),
+            gate: file_gate::FileGate::new(),
             integrity: None,
         }
     }
@@ -430,6 +444,7 @@ impl SqliteEventStore {
     ) -> EventStoreResult<Self> {
         Ok(SqliteEventStore {
             pool: Arc::new(pool),
+            gate: file_gate::FileGate::new(),
             integrity: Some(Arc::new(IntegrityConfig {
                 chain: Arc::new(HmacSha256Chain::new(key).map_err(EventStoreError::from)?),
                 key_id: key_id.into(),
@@ -618,9 +633,11 @@ impl EventStore for SqliteEventStore {
         limit: usize,
     ) -> EventStoreResult<Vec<Event>> {
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
         let aggregate_type = aggregate_type.to_string();
         let identities = tokio::task::spawn_blocking(move || -> EventStoreResult<Vec<PublicationIdentity>> {
             let mut conn = pool.get().map_err(|e| EventStoreError::database(e.to_string()))?;
+            let _reading = gate.read(&mut conn);
             diesel::sql_query("SELECT e.aggregate_type, e.aggregate_id, e.sequence FROM event_publications p JOIN events e ON e.event_id = p.event_id WHERE e.aggregate_type = ? ORDER BY e.id LIMIT ?")
                 .bind::<diesel::sql_types::Text, _>(&aggregate_type)
                 .bind::<diesel::sql_types::BigInt, _>(limit.min(1000) as i64)
@@ -646,15 +663,28 @@ impl EventStore for SqliteEventStore {
 
     async fn acknowledge_publication(&self, event_id: Uuid) -> EventStoreResult<()> {
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
         tokio::task::spawn_blocking(move || -> EventStoreResult<()> {
+            let permit = gate
+                .write(&pool)
+                .map_err(|e| EventStoreError::database(e.to_string()))?;
             let mut conn = pool
                 .get()
                 .map_err(|e| EventStoreError::database(e.to_string()))?;
-            diesel::sql_query("DELETE FROM event_publications WHERE event_id = ?")
-                .bind::<diesel::sql_types::Text, _>(event_id.to_string())
-                .execute(&mut *conn)
-                .map_err(|e| EventStoreError::database(e.to_string()))?;
-            Ok(())
+            let result = crate::connection::write_transaction(
+                &mut conn,
+                &permit,
+                EventStoreError::database,
+                |conn| {
+                    diesel::sql_query("DELETE FROM event_publications WHERE event_id = ?")
+                        .bind::<diesel::sql_types::Text, _>(event_id.to_string())
+                        .execute(conn)
+                        .map(drop)
+                        .map_err(|e| EventStoreError::database(e.to_string()))
+                },
+            );
+            permit.finish(&result);
+            result
         })
         .await
         .map_err(|e| EventStoreError::other(e.to_string()))?
@@ -681,6 +711,7 @@ impl EventStore for SqliteEventStore {
         let aggregate_type = aggregate_type.to_string();
         let aggregate_id = aggregate_id.to_string();
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
         let integrity = self.integrity.clone();
 
         tokio::task::spawn_blocking(move || {
@@ -690,6 +721,7 @@ impl EventStore for SqliteEventStore {
             let mut conn = pool.get().map_err(|e| {
                 EventStoreError::database(format!("Failed to get connection: {}", e))
             })?;
+            let _reading = gate.read(&mut conn);
 
             AnsiTransactionManager::begin_transaction(&mut *conn)
                 .map_err(|e| EventStoreError::database(e.to_string()))?;
@@ -745,12 +777,14 @@ impl EventStore for SqliteEventStore {
     ) -> EventStoreResult<Vec<Event>> {
         let aggregate_id = aggregate_id.to_string();
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
         let integrity = self.integrity.clone();
 
         tokio::task::spawn_blocking(move || {
             let mut conn = pool.get().map_err(|e| {
                 EventStoreError::database(format!("Failed to get connection: {}", e))
             })?;
+            let _reading = gate.read(&mut conn);
 
             let records: Vec<EventRecord> = events::table
                 .filter(events::aggregate_id.eq(&aggregate_id))
@@ -785,12 +819,14 @@ impl EventStore for SqliteEventStore {
         let aggregate_type = aggregate_type.to_string();
         let aggregate_id = aggregate_id.to_string();
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
         let integrity = self.integrity.clone();
 
         tokio::task::spawn_blocking(move || {
             let mut conn = pool.get().map_err(|e| {
                 EventStoreError::database(format!("Failed to get connection: {}", e))
             })?;
+            let _reading = gate.read(&mut conn);
 
             let records: Vec<EventRecord> = events::table
                 .filter(events::aggregate_type.eq(&aggregate_type))
@@ -819,12 +855,14 @@ impl EventStore for SqliteEventStore {
 
     async fn stream_all(&self, from_position: i64) -> EventStoreResult<Vec<Event>> {
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
         let integrity = self.integrity.clone();
 
         tokio::task::spawn_blocking(move || {
             let mut conn = pool.get().map_err(|e| {
                 EventStoreError::database(format!("Failed to get connection: {}", e))
             })?;
+            let _reading = gate.read(&mut conn);
 
             let records: Vec<EventRecord> = events::table
                 .filter(events::id.ge(from_position as i32))
@@ -844,11 +882,13 @@ impl EventStore for SqliteEventStore {
     async fn get_version(&self, aggregate_id: &str) -> EventStoreResult<i64> {
         let aggregate_id = aggregate_id.to_string();
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
 
         tokio::task::spawn_blocking(move || {
             let mut conn = pool.get().map_err(|e| {
                 EventStoreError::database(format!("Failed to get connection: {}", e))
             })?;
+            let _reading = gate.read(&mut conn);
 
             let version = events::table
                 .filter(events::aggregate_id.eq(&aggregate_id))
@@ -871,11 +911,13 @@ impl EventStore for SqliteEventStore {
         let aggregate_type = aggregate_type.to_string();
         let aggregate_id = aggregate_id.to_string();
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
 
         tokio::task::spawn_blocking(move || {
             let mut conn = pool.get().map_err(|e| {
                 EventStoreError::database(format!("Failed to get connection: {}", e))
             })?;
+            let _reading = gate.read(&mut conn);
             events::table
                 .filter(events::aggregate_type.eq(&aggregate_type))
                 .filter(events::aggregate_id.eq(&aggregate_id))
@@ -891,27 +933,39 @@ impl EventStore for SqliteEventStore {
     async fn save_snapshot(&self, snapshot: &Snapshot) -> EventStoreResult<()> {
         let record = NewSnapshotRecord::from_snapshot(snapshot)?;
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
 
         tokio::task::spawn_blocking(move || -> EventStoreResult<()> {
+            let permit = gate
+                .write(&pool)
+                .map_err(|e| EventStoreError::database(e.to_string()))?;
             let mut conn = pool.get().map_err(|e| {
                 EventStoreError::database(format!("Failed to get connection: {}", e))
             })?;
 
             // One snapshot per aggregate: replace the stored row in place rather
             // than accumulating stale versions.
-            diesel::insert_into(snapshots::table)
-                .values(&record)
-                .on_conflict((snapshots::aggregate_type, snapshots::aggregate_id))
-                .do_update()
-                .set((
-                    snapshots::version.eq(record.version),
-                    snapshots::state.eq(&record.state),
-                    snapshots::created_at.eq(record.created_at),
-                ))
-                .execute(&mut *conn)
-                .map_err(|e| EventStoreError::database(e.to_string()))?;
-
-            Ok(())
+            let result = crate::connection::write_transaction(
+                &mut conn,
+                &permit,
+                EventStoreError::database,
+                |conn| {
+                    diesel::insert_into(snapshots::table)
+                        .values(&record)
+                        .on_conflict((snapshots::aggregate_type, snapshots::aggregate_id))
+                        .do_update()
+                        .set((
+                            snapshots::version.eq(record.version),
+                            snapshots::state.eq(&record.state),
+                            snapshots::created_at.eq(record.created_at),
+                        ))
+                        .execute(conn)
+                        .map(drop)
+                        .map_err(|e| EventStoreError::database(e.to_string()))
+                },
+            );
+            permit.finish(&result);
+            result
         })
         .await
         .map_err(|e| EventStoreError::other(format!("Task join error: {}", e)))?
@@ -920,11 +974,13 @@ impl EventStore for SqliteEventStore {
     async fn load_snapshot(&self, aggregate_id: &str) -> EventStoreResult<Option<Snapshot>> {
         let aggregate_id = aggregate_id.to_string();
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
 
         tokio::task::spawn_blocking(move || {
             let mut conn = pool.get().map_err(|e| {
                 EventStoreError::database(format!("Failed to get connection: {}", e))
             })?;
+            let _reading = gate.read(&mut conn);
 
             let record: Option<SnapshotRecord> = snapshots::table
                 .filter(snapshots::aggregate_id.eq(&aggregate_id))
@@ -946,11 +1002,13 @@ impl EventStore for SqliteEventStore {
         let aggregate_type = aggregate_type.to_string();
         let aggregate_id = aggregate_id.to_string();
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
 
         tokio::task::spawn_blocking(move || {
             let mut conn = pool.get().map_err(|e| {
                 EventStoreError::database(format!("Failed to get connection: {}", e))
             })?;
+            let _reading = gate.read(&mut conn);
 
             let record: Option<SnapshotRecord> = snapshots::table
                 .filter(snapshots::aggregate_type.eq(&aggregate_type))
