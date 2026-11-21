@@ -2,9 +2,9 @@
 
 **Last updated:** 2026-11-21
 **Current development version:** 0.9.4
-**Latest published version:** 0.9.3
-**Status:** All fourteen 0.9.3 packages are published to crates.io (2026-11-21) with the
-sqlx-facade removal, the Diesel Android template and the `arc-es-sqlite` per-file queue, on top of the 0.9.2
+**Latest published version:** 0.9.4
+**Status:** All fourteen 0.9.4 packages are published to crates.io (2026-11-21) with the
+`arc-es-sqlite` first-read fix, on top of the 0.9.3 sqlx-facade removal, the Diesel Android template and the `arc-es-sqlite` per-file queue, on top of the 0.9.2
 `arc-es-postgres` write guard and patched Actix dependencies and the 0.9.1 security,
 delivery and verification fixes below. v0.9.0 is the Phase 2 release: WebSocket and
 projection security hardening (breaking; see [Upgrading](docs/upgrading.md)), the
@@ -31,7 +31,7 @@ observability, and developer experience.
 This is the canonical project-status and roadmap tracker. Current source code and accepted ADRs
 take precedence when a claim here becomes stale.
 
-## SQLite first read on a new connection — 0.9.4, not yet tagged or published — 2026-11-21
+## SQLite first read on a new connection — 0.9.4 — 2026-11-21
 
 - Problem: after the 0.9.3 queue, the first statement on a new connection still ran outside it.
   It loads the schema and needs a shared lock, and it was r2d2's `SELECT 1` at check-out and the
@@ -54,7 +54,7 @@ take precedence when a claim here becomes stale.
   `test_on_check_out(false)`. Documented in the `arc-es-sqlite` README and the changelog.
 - README correction: `SqliteSessionStore::new` does not set the 5-second busy timeout; the
   sentence now names the stores that do.
-- Status: 0.9.4 is prepared as the source version in this change; it is not tagged or published.
+- Status: released as 0.9.4 on 2026-11-21 (tag `v0.9.4`, fourteen crates on crates.io).
 
 ## SQLite in-process fairness — 0.9.3 — 2026-11-20
 

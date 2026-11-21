@@ -1,7 +1,6 @@
 # Published Packages
 
-The latest published package version is **0.9.3**. Source version **0.9.4** (prepared,
-not yet published) fixes a stall of the first read on a new `arc-es-sqlite` connection under
+The latest published package version is **0.9.4**. Source version **0.9.4** fixes a stall of the first read on a new `arc-es-sqlite` connection under
 nonstop commits; 0.9.3 removes
 the `sqlx` facade from `arc-es-postgres` so Arc's lockfile carries a patched `libsqlite3-sys`,
 with no API change, and queues `arc-es-sqlite` operations per database file; 0.9.2 adds
@@ -13,10 +12,10 @@ adds the headless `arc-stack` and native `arc-ffi` adapters, and adds native And
 scaffolding with `arc new <name> --android`. Install the latest published CLI from crates.io:
 
 ```bash
-cargo install arc-web-cli --version 0.9.3 --locked --force
+cargo install arc-web-cli --version 0.9.4 --locked --force
 ```
 
-All fourteen matching 0.9.3 packages are published to crates.io. `arc-stack` and
+All fourteen matching 0.9.4 packages are published to crates.io. `arc-stack` and
 `arc-ffi` first joined the lockstep package set in 0.9.0. Generated
 applications resolve the same framework and authentication-plugin versions.
 Version 0.8.11 gives the generated admin layout a collapsible navigation rail
@@ -61,8 +60,8 @@ The CLI writes normal Cargo dependencies:
 
 ```toml
 [dependencies]
-arc-core = "0.9.3"
-arc-web = "0.9.3"
+arc-core = "0.9.4"
+arc-web = "0.9.4"
 ```
 
 You may create the same application manually, but then you must also supply the environment bootstrap, migrations, aggregate, routes, and runtime entry point that the CLI normally generates.
