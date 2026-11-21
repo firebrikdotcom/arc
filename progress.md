@@ -30,6 +30,38 @@ observability, and developer experience.
 This is the canonical project-status and roadmap tracker. Current source code and accepted ADRs
 take precedence when a claim here becomes stale.
 
+## SQLite in-process fairness — 0.9.3, not yet published — 2026-11-20
+
+- Problem: `arc-es-sqlite` could return `database is locked` from an append, a projection write
+  or a read under sustained contention inside one process, because SQLite's busy retry is a
+  poll and not fair. `tests/concurrency.rs::simultaneous_distinct_streams_and_projection_writes_succeed`
+  (8 workers, 320 commits on one rollback-journal file) takes about 5.4 s with a disk-backed
+  `TMPDIR`, against the 5-second busy timeout. Present in released 0.9.2.
+- Fix (`crates/arc-es-sqlite/src/file_gate.rs`): the stores queue among themselves per
+  database file before entering SQLite. Writers take turns first-in, first-out for one
+  `BEGIN IMMEDIATE` transaction; reads run together and beside a writer until it commits; a
+  commit waits for running reads, and reads arriving during it all run before the next commit.
+  The gate is found through the file name SQLite reports, so every store, pool and path
+  spelling in the process shares it. No API, journal-mode, durability or busy-timeout change.
+  Single-statement writes now run in a `BEGIN IMMEDIATE` transaction like appends.
+- Measured on this development host, test binary run directly, `TMPDIR` on a btrfs disk
+  outside the repository: the whole `concurrency` binary (its tests in parallel) failed 38 of
+  40 runs before and 0 of 40 after; the single test alone failed 0 of 100 before on this host
+  (3–25 % was measured elsewhere) and 0 of 100 after, including a run that took 29 s while the
+  workspace tests ran beside it. The single test's median is unchanged on disk (5.56 s before,
+  5.54 s after) and went from 0.15 s to 0.06 s on tmpfs. A writer-only queue was tried first
+  and rejected: it made commits back-to-back and starved readers instead (28 of 40
+  whole-binary runs failed at `load`).
+- Regression tests, independent of disk speed: slowed commits against a 100 ms busy timeout
+  (30 of 30 runs fail without the fix), a one-connection pool shared by readers and writers,
+  and unit tests of ordering, path spellings, nesting, panics and the external-lock rule.
+  `cargo test --all-features` passes with the default `TMPDIR` and with the disk one (432
+  tests each); CI has not run on this branch yet.
+- Limits: fairness is per process. Other processes and connections opened outside these stores
+  (`arc-auth-db`, and `arc-web`'s `get_connection` pool that the reference application's
+  migration command uses) still compete through the busy timeout. A queued
+  operation has no deadline of its own. In-memory databases are not queued.
+
 ## Patched SQLite dependency — 0.9.3, not yet published — 2026-11-19
 
 - `arc-es-postgres` depends on `sqlx-core` and `sqlx-postgres` 0.8 instead of the `sqlx`

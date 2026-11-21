@@ -41,6 +41,29 @@
   `sqlx` facade keeps `libsqlite3-sys` 0.30 until it drops the facade or moves to a release
   of it that accepts the patched line.
 
+### Fixed
+
+- `arc-es-sqlite`: sustained contention inside one process no longer ends in
+  `database is locked`. SQLite makes a connection that finds the file locked poll for it, and
+  the first to poll after a commit wins, so under continuous writes one caller could lose
+  every retry for the whole 5-second busy timeout although nobody held the file for long.
+  `SqliteEventStore`, `SqliteReadModelStore`, `SqliteSessionStore` and `SqliteAccessLogger`
+  now queue among themselves, per database file, before they enter SQLite: writers take turns
+  first-in, first-out; reads run together and beside a writer until it commits; a commit waits
+  for the reads already running, and reads that arrive during it all run before the next
+  commit. The queue is shared by all stores and pools of the process that open the same file,
+  under any spelling of its path, and is held on the blocking thread for one operation, never
+  across an `await`. No public API, journal mode, durability or busy-timeout setting changes.
+- Read-model upserts, deletes and truncates, publication acknowledgements, snapshot saves and
+  session writes now run as one `BEGIN IMMEDIATE` transaction each, as appends already did,
+  instead of a bare statement. The effect of each is the same.
+- Unchanged, and still bounded by the busy timeout: contention with another process or with
+  a connection opened outside these stores (including `arc-auth-db` and an application's own
+  Diesel pool on the same file). A writer that queued behind one refused by such a lock for
+  the whole timeout reports `database is locked` as well, instead of starting a second full
+  timeout. A queued operation has no deadline of its own, only the bounded operations ahead
+  of it. In-memory databases are not queued.
+
 ## 0.9.2 — 2026-11-19
 
 All fourteen reusable crates are published to crates.io.
