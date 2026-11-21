@@ -1,7 +1,7 @@
 # Arc Project Progress
 
 **Last updated:** 2026-11-21
-**Current development version:** 0.9.3
+**Current development version:** 0.9.4
 **Latest published version:** 0.9.3
 **Status:** All fourteen 0.9.3 packages are published to crates.io (2026-11-21) with the
 sqlx-facade removal, the Diesel Android template and the `arc-es-sqlite` per-file queue, on top of the 0.9.2

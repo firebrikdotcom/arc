@@ -10,8 +10,8 @@ readme = "../../README.md"
 keywords = ["arc", "session", "authentication", "browser", "actix"]
 
 [dependencies]
-arc-auth-core = { path = "../arc-auth-core", version = "0.9.3" }
-arc-web = { path = "../arc-web", version = "0.9.3" }
+arc-auth-core = { path = "../arc-auth-core", version = "0.9.4" }
+arc-web = { path = "../arc-web", version = "0.9.4" }
 actix-session.workspace = true
 actix-web.workspace = true
 async-trait.workspace = true

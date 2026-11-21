@@ -1,8 +1,10 @@
 # Published Packages
 
-The latest published package version is **0.9.3**. Source version **0.9.3** removes
+The latest published package version is **0.9.3**. Source version **0.9.4** (prepared,
+not yet published) fixes a stall of the first read on a new `arc-es-sqlite` connection under
+nonstop commits; 0.9.3 removes
 the `sqlx` facade from `arc-es-postgres` so Arc's lockfile carries a patched `libsqlite3-sys`,
-with no API change and queues `arc-es-sqlite` operations per database file; 0.9.2 adds
+with no API change, and queues `arc-es-sqlite` operations per database file; 0.9.2 adds
 the optional `arc-es-postgres` write guard and patched Actix dependencies; 0.9.1 is the
 security and reliability patch. All are described in the [changelog](https://github.com/firebrikdotcom/arc/blob/master/CHANGELOG.md). The
 0.9.0 minor release is the Phase 2 release: it hardens WebSocket and projection security (with breaking changes;

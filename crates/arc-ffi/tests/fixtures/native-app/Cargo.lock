@@ -10,7 +10,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "arc-core"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "async-trait",
  "hmac",
@@ -25,7 +25,7 @@ dependencies = [
 
 [[package]]
 name = "arc-es-sqlite"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "arc-core",
  "async-trait",
@@ -40,7 +40,7 @@ dependencies = [
 
 [[package]]
 name = "arc-ffi"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "arc-core",
  "arc-stack",
@@ -66,7 +66,7 @@ dependencies = [
 
 [[package]]
 name = "arc-stack"
-version = "0.9.3"
+version = "0.9.4"
 dependencies = [
  "arc-core",
  "arc-es-sqlite",
