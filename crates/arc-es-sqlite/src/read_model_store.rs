@@ -51,6 +51,7 @@ type Pool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
 #[derive(Clone)]
 pub struct SqliteReadModelStore {
     pool: Arc<Pool>,
+    gate: Arc<crate::file_gate::FileGate>,
 }
 
 impl SqliteReadModelStore {
@@ -66,6 +67,7 @@ impl SqliteReadModelStore {
             })?;
         Ok(SqliteReadModelStore {
             pool: Arc::new(pool),
+            gate: crate::file_gate::FileGate::new(),
         })
     }
 
@@ -75,6 +77,7 @@ impl SqliteReadModelStore {
     pub fn with_pool(pool: Pool) -> Self {
         Self {
             pool: Arc::new(pool),
+            gate: crate::file_gate::FileGate::new(),
         }
     }
 }
@@ -124,10 +127,12 @@ impl ReadModelStore for SqliteReadModelStore {
         let data = serde_json::to_string(&op.row)
             .map_err(|e| ReadModelError::write_failed(format!("Failed to serialize row: {e}")))?;
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
         let table = op.table.clone();
         let key = op.key.clone();
 
         tokio::task::spawn_blocking(move || -> ReadModelResult<()> {
+            let permit = gate.write(&pool);
             let mut conn = pool.get().map_err(|e| {
                 ReadModelError::write_failed(format!("Failed to get connection: {e}"))
             })?;
@@ -138,13 +143,22 @@ impl ReadModelStore for SqliteReadModelStore {
                  WHERE {table}.version < excluded.version"
             );
 
-            diesel::sql_query(sql)
-                .bind::<Text, _>(key)
-                .bind::<BigInt, _>(version)
-                .bind::<Text, _>(data)
-                .execute(&mut *conn)
-                .map_err(|e| ReadModelError::write_failed(e.to_string()))?;
-            Ok(())
+            let result = crate::connection::write_transaction(
+                &mut conn,
+                &permit,
+                ReadModelError::write_failed,
+                |conn| {
+                    diesel::sql_query(sql)
+                        .bind::<Text, _>(key)
+                        .bind::<BigInt, _>(version)
+                        .bind::<Text, _>(data)
+                        .execute(conn)
+                        .map(drop)
+                        .map_err(|e| ReadModelError::write_failed(e.to_string()))
+                },
+            );
+            permit.finish(&result);
+            result
         })
         .await
         .map_err(|e| ReadModelError::other(format!("Task join error: {e}")))?
@@ -153,18 +167,29 @@ impl ReadModelStore for SqliteReadModelStore {
     async fn delete(&self, table: &str, key: &str) -> ReadModelResult<()> {
         check_ident("table name", table)?;
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
         let table = table.to_string();
         let key = key.to_string();
 
         tokio::task::spawn_blocking(move || -> ReadModelResult<()> {
+            let permit = gate.write(&pool);
             let mut conn = pool.get().map_err(|e| {
                 ReadModelError::write_failed(format!("Failed to get connection: {e}"))
             })?;
-            diesel::sql_query(format!("DELETE FROM {table} WHERE id = ?"))
-                .bind::<Text, _>(key)
-                .execute(&mut *conn)
-                .map_err(|e| ReadModelError::write_failed(e.to_string()))?;
-            Ok(())
+            let result = crate::connection::write_transaction(
+                &mut conn,
+                &permit,
+                ReadModelError::write_failed,
+                |conn| {
+                    diesel::sql_query(format!("DELETE FROM {table} WHERE id = ?"))
+                        .bind::<Text, _>(key)
+                        .execute(conn)
+                        .map(drop)
+                        .map_err(|e| ReadModelError::write_failed(e.to_string()))
+                },
+            );
+            permit.finish(&result);
+            result
         })
         .await
         .map_err(|e| ReadModelError::other(format!("Task join error: {e}")))?
@@ -173,6 +198,7 @@ impl ReadModelStore for SqliteReadModelStore {
     async fn get(&self, table: &str, key: &str) -> ReadModelResult<Option<Row>> {
         check_ident("table name", table)?;
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
         let table = table.to_string();
         let key = key.to_string();
 
@@ -180,6 +206,7 @@ impl ReadModelStore for SqliteReadModelStore {
             let mut conn = pool.get().map_err(|e| {
                 ReadModelError::query_failed(format!("Failed to get connection: {e}"))
             })?;
+            let _reading = gate.read(&mut conn);
             let rows: Vec<DataRow> =
                 diesel::sql_query(format!("SELECT data FROM {table} WHERE COALESCE(json_type(data, '$._arc_deleted'), '') <> 'true' AND id = ? LIMIT 1"))
                     .bind::<Text, _>(key)
@@ -205,6 +232,7 @@ impl ReadModelStore for SqliteReadModelStore {
         check_ident("table name", table)?;
         check_ident("field name", field)?;
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
         let table = table.to_string();
         let path = format!("$.{field}");
 
@@ -226,6 +254,7 @@ impl ReadModelStore for SqliteReadModelStore {
             let mut conn = pool.get().map_err(|e| {
                 ReadModelError::query_failed(format!("Failed to get connection: {e}"))
             })?;
+            let _reading = gate.read(&mut conn);
             let sql = format!("SELECT data FROM {table} WHERE COALESCE(json_type(data, '$._arc_deleted'), '') <> 'true' AND json_extract(data, ?) IS ?");
             let rows: Vec<DataRow> = diesel::sql_query(sql)
                 .bind::<Text, _>(path)
@@ -243,12 +272,14 @@ impl ReadModelStore for SqliteReadModelStore {
     async fn list(&self, table: &str) -> ReadModelResult<Vec<Row>> {
         check_ident("table name", table)?;
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
         let table = table.to_string();
 
         let rows = tokio::task::spawn_blocking(move || -> ReadModelResult<Vec<String>> {
             let mut conn = pool.get().map_err(|e| {
                 ReadModelError::query_failed(format!("Failed to get connection: {e}"))
             })?;
+            let _reading = gate.read(&mut conn);
             let rows: Vec<DataRow> = diesel::sql_query(format!("SELECT data FROM {table} WHERE COALESCE(json_type(data, '$._arc_deleted'), '') <> 'true'"))
                 .load(&mut *conn)
                 .map_err(|e| ReadModelError::query_failed(e.to_string()))?;
@@ -274,11 +305,13 @@ impl ReadModelStore for SqliteReadModelStore {
         };
         let sql = format!("SELECT data FROM {table} WHERE COALESCE(json_type(data, '$._arc_deleted'), '') <> 'true' AND (? = '' OR instr(lower(COALESCE(json_extract(data, '$.name'), '')), ?) > 0) ORDER BY {order} LIMIT ? OFFSET ?");
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
         let query = query.clone();
         tokio::task::spawn_blocking(move || {
             let mut conn = pool
                 .get()
                 .map_err(|e| ReadModelError::query_failed(e.to_string()))?;
+            let _reading = gate.read(&mut conn);
             let rows: Vec<DataRow> = diesel::sql_query(sql)
                 .bind::<Text, _>(query.filter.to_ascii_lowercase())
                 .bind::<Text, _>(query.filter.to_ascii_lowercase())
@@ -299,16 +332,27 @@ impl ReadModelStore for SqliteReadModelStore {
     async fn truncate(&self, table: &str) -> ReadModelResult<()> {
         check_ident("table name", table)?;
         let pool = self.pool.clone();
+        let gate = self.gate.clone();
         let table = table.to_string();
 
         tokio::task::spawn_blocking(move || -> ReadModelResult<()> {
+            let permit = gate.write(&pool);
             let mut conn = pool.get().map_err(|e| {
                 ReadModelError::schema_failed(format!("Failed to get connection: {e}"))
             })?;
-            diesel::sql_query(format!("DELETE FROM {table}"))
-                .execute(&mut *conn)
-                .map_err(|e| ReadModelError::schema_failed(e.to_string()))?;
-            Ok(())
+            let result = crate::connection::write_transaction(
+                &mut conn,
+                &permit,
+                ReadModelError::schema_failed,
+                |conn| {
+                    diesel::sql_query(format!("DELETE FROM {table}"))
+                        .execute(conn)
+                        .map(drop)
+                        .map_err(|e| ReadModelError::schema_failed(e.to_string()))
+                },
+            );
+            permit.finish(&result);
+            result
         })
         .await
         .map_err(|e| ReadModelError::other(format!("Task join error: {e}")))?

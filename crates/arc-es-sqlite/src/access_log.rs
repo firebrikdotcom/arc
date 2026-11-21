@@ -26,6 +26,7 @@ pub struct AccessLogPrivacy {
 pub struct SqliteAccessLogger {
     path: Arc<PathBuf>,
     permit: Arc<Semaphore>,
+    gate: Arc<crate::file_gate::FileGate>,
     privacy: AccessLogPrivacy,
     busy_timeout_ms: u32,
 }
@@ -55,6 +56,7 @@ impl SqliteAccessLogger {
         let logger = Self {
             path: Arc::new(path),
             permit: Arc::new(Semaphore::new(1)),
+            gate: crate::file_gate::FileGate::new(),
             privacy,
             busy_timeout_ms,
         };
@@ -82,6 +84,7 @@ impl SqliteAccessLogger {
             .try_acquire_owned()
             .map_err(|_| AccessLogError::Sink("sqlite access journal busy".into()))?;
         let path = self.path.clone();
+        let gate = self.gate.clone();
         let timeout = self.busy_timeout_ms;
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
@@ -99,6 +102,11 @@ impl SqliteAccessLogger {
                 "PRAGMA busy_timeout={timeout}; PRAGMA synchronous=FULL;"
             ))
             .map_err(|_| sink_error())?;
+            // Every operation of this journal writes. Take turns with any
+            // other writer of the same file in this process (another logger
+            // opened on the path, or a store sharing the file). The journal
+            // has no readers among the stores, so none are held back.
+            let _write_slot = gate.write_on(&mut conn);
             operation(&mut conn)
         })
         .await

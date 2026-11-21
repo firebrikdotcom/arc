@@ -92,6 +92,14 @@ seconds, such as during a long transaction or by another process. Journal mode
 is unchanged (WAL is not enabled). This changes contention latency and lock
 acquisition behavior; it ships in 0.9.0, published to crates.io.
 
+Since 0.9.3 the `arc-es-sqlite` stores queue their operations first-in,
+first-out per database file inside one process (writers take turns; in
+rollback-journal mode reads wait only for a commit), because SQLite's busy retry is not fair and sustained contention
+longer than the timeout could starve one caller into `database is locked`. No
+API or setting changes. The busy timeout still bounds locks held by another
+process or by connections opened outside these stores
+(`arc-auth-db`, an application's own pool); see the `arc-es-sqlite` README.
+
 - **SemVer:** `0.x` releases move in lockstep. A patch bump is compatible; a
   minor bump may break the public API surface defined in ADR 0002.
 - **Event envelopes** evolve additively within an `envelope_version`.

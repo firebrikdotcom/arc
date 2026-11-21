@@ -18,6 +18,13 @@ unchanged; WAL is not enabled. This observable latency/contention behavior
 change ships in 0.9.0, published to crates.io; see
 [Upgrading](upgrading.md).
 
+Since 0.9.3 the `arc-es-sqlite` stores also queue their operations first-in,
+first-out per database file inside one process (writers take turns; in
+rollback-journal mode reads wait only for a commit), so contention among the stores of one process no longer ends in
+`database is locked` when it lasts longer than the busy timeout. The 5-second
+timeout still bounds a lock held by another process or by a connection opened
+outside these stores.
+
 ## Dependencies and features
 
 ```toml

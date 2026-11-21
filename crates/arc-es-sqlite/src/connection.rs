@@ -33,6 +33,82 @@ pub(crate) fn rollback_append(conn: &mut SqliteConnection) {
     }
 }
 
+/// Run `body` as one write transaction for the holder of the file's write
+/// slot. The writer is reserved up front (`BEGIN IMMEDIATE`): a deferred
+/// read-to-write upgrade can fail immediately even with a busy timeout, and
+/// while this waits for a writer outside the process the stores' readers
+/// carry on. They are held back only for the commit itself. The body or
+/// commit error is preserved; COMMIT can fail (for example while an external
+/// reader holds a shared lock) and leave a transaction open.
+pub(crate) fn write_transaction<T, E>(
+    conn: &mut SqliteConnection,
+    permit: &crate::file_gate::WritePermit,
+    database_error: impl Fn(String) -> E,
+    body: impl FnOnce(&mut SqliteConnection) -> Result<T, E>,
+) -> Result<T, E> {
+    let usual_timeout = spend_busy_timeout(conn, permit.queued_behind_refusals())
+        .map_err(|e| database_error(e.to_string()))?;
+    let begun = AnsiTransactionManager::begin_transaction_sql(conn, "BEGIN IMMEDIATE");
+    // Only the wait for the write lock is shortened: it is the one this
+    // writer already sat through in the queue. The body and COMMIT, which
+    // may wait for a reader, get the connection's usual timeout back.
+    if let Some(timeout) = usual_timeout {
+        if let Err(error) = set_busy_timeout(conn, timeout) {
+            // A connection that cannot get its timeout back must not be reused.
+            rollback_append(conn);
+            *AnsiTransactionManager::transaction_manager_status_mut(conn) =
+                diesel::connection::TransactionManagerStatus::InError;
+            return Err(database_error(error.to_string()));
+        }
+    }
+    let result = begun
+        .map_err(|e| database_error(e.to_string()))
+        .and_then(|()| body(conn))
+        .and_then(|value| {
+            permit.exclude_readers();
+            AnsiTransactionManager::commit_transaction(conn)
+                .map(|()| value)
+                .map_err(|e| database_error(e.to_string()))
+        });
+    if result.is_err() {
+        rollback_append(conn);
+    }
+    result
+}
+
+/// A writer that queued behind attempts refused by a lock outside the gate
+/// has already waited `spent` for that lock. Take it off this connection's
+/// busy timeout for the writer's own attempt at the write lock, which it
+/// still makes, so that queueing does not multiply the bounded wait. Returns
+/// the timeout to put back, if it was changed.
+fn spend_busy_timeout(
+    conn: &mut SqliteConnection,
+    spent: std::time::Duration,
+) -> diesel::QueryResult<Option<i32>> {
+    use diesel::prelude::*;
+    #[derive(QueryableByName)]
+    struct Timeout {
+        #[diesel(sql_type = diesel::sql_types::Integer)]
+        timeout: i32,
+    }
+    if spent.is_zero() {
+        return Ok(None);
+    }
+    let usual = diesel::sql_query("PRAGMA busy_timeout")
+        .get_result::<Timeout>(conn)?
+        .timeout;
+    if usual <= 0 {
+        return Ok(None);
+    }
+    let spent = i32::try_from(spent.as_millis()).unwrap_or(i32::MAX);
+    set_busy_timeout(conn, usual.saturating_sub(spent).max(0))?;
+    Ok(Some(usual))
+}
+
+fn set_busy_timeout(conn: &mut SqliteConnection, milliseconds: i32) -> diesel::QueryResult<()> {
+    conn.batch_execute(&format!("PRAGMA busy_timeout = {milliseconds}"))
+}
+
 #[cfg(test)]
 pub(crate) fn assert_timeout_on_replacement(
     pool: &diesel::r2d2::Pool<diesel::r2d2::ConnectionManager<SqliteConnection>>,
@@ -69,4 +145,129 @@ pub(crate) fn assert_timeout_on_replacement(
             .unwrap()
             .is_none()
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use diesel::connection::InstrumentationEvent;
+    use diesel::prelude::*;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    struct File(std::path::PathBuf);
+    impl File {
+        fn new() -> Self {
+            let name = format!("arc-connection-{}.db", uuid::Uuid::new_v4());
+            let file = Self(std::env::temp_dir().join(name));
+            file.connect()
+                .batch_execute("CREATE TABLE notes (body TEXT)")
+                .unwrap();
+            file
+        }
+        fn connect(&self) -> SqliteConnection {
+            SqliteConnection::establish(self.0.to_str().unwrap()).unwrap()
+        }
+    }
+    impl Drop for File {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    fn busy_timeout(conn: &mut SqliteConnection) -> i32 {
+        #[derive(QueryableByName)]
+        struct Timeout {
+            #[diesel(sql_type = diesel::sql_types::Integer)]
+            timeout: i32,
+        }
+        diesel::sql_query("PRAGMA busy_timeout")
+            .get_result::<Timeout>(conn)
+            .unwrap()
+            .timeout
+    }
+
+    /// A connection with a 300 ms busy timeout that records its statements.
+    fn recorded(file: &File) -> (SqliteConnection, Arc<Mutex<Vec<String>>>) {
+        let mut conn = file.connect();
+        set_busy_timeout(&mut conn, 300).unwrap();
+        let statements = Arc::new(Mutex::new(Vec::new()));
+        let record = statements.clone();
+        conn.set_instrumentation(move |event: InstrumentationEvent<'_>| {
+            if let InstrumentationEvent::StartQuery { query, .. } = event {
+                let query = query.to_string();
+                let statement = query.split(" -- ").next().unwrap_or_default();
+                record.lock().unwrap().push(statement.to_string());
+            }
+        });
+        (conn, statements)
+    }
+
+    #[test]
+    fn time_spent_queueing_shortens_only_the_wait_for_the_write_lock() {
+        let file = File::new();
+        let (mut conn, statements) = recorded(&file);
+        // Queued 200 of its 300 ms behind refused attempts: 100 ms are left
+        // for BEGIN IMMEDIATE, and the full 300 for the body and COMMIT.
+        let permit = crate::file_gate::WritePermit::queued_behind(Duration::from_millis(200));
+        let during_body = write_transaction(
+            &mut conn,
+            &permit,
+            |e| e,
+            |conn| {
+                let timeout = busy_timeout(conn);
+                conn.batch_execute("INSERT INTO notes VALUES ('kept')")
+                    .map_err(|e| e.to_string())?;
+                Ok(timeout)
+            },
+        )
+        .unwrap();
+        assert_eq!(during_body, 300);
+        assert_eq!(busy_timeout(&mut conn), 300);
+        assert_eq!(
+            statements.lock().unwrap()[..6],
+            [
+                "PRAGMA busy_timeout",
+                "PRAGMA busy_timeout = 100",
+                "BEGIN IMMEDIATE",
+                "PRAGMA busy_timeout = 300",
+                "PRAGMA busy_timeout",
+                "INSERT INTO notes VALUES ('kept')",
+            ]
+        );
+
+        // A writer that queued its whole timeout still tries once.
+        let permit = crate::file_gate::WritePermit::queued_behind(Duration::from_secs(60));
+        statements.lock().unwrap().clear();
+        write_transaction(&mut conn, &permit, |e| e, |_| Ok(())).unwrap();
+        assert_eq!(
+            statements.lock().unwrap()[1..3],
+            ["PRAGMA busy_timeout = 0", "BEGIN IMMEDIATE"]
+        );
+        assert_eq!(busy_timeout(&mut conn), 300);
+    }
+
+    #[test]
+    fn the_usual_timeout_returns_when_the_write_lock_is_refused() {
+        let file = File::new();
+        let mut outside = file.connect();
+        outside.batch_execute("BEGIN IMMEDIATE").unwrap();
+        let (mut conn, _) = recorded(&file);
+        let permit = crate::file_gate::WritePermit::queued_behind(Duration::from_secs(60));
+        let refused = write_transaction(&mut conn, &permit, |e| e, |_| Ok(())).unwrap_err();
+        assert!(refused.contains(crate::file_gate::LOCKED), "{refused}");
+        assert_eq!(busy_timeout(&mut conn), 300);
+        // The connection is clean and usable once the lock is gone.
+        outside.batch_execute("ROLLBACK").unwrap();
+        write_transaction(&mut conn, &permit, |e| e, |_| Ok::<_, String>(())).unwrap();
+
+        // A writer that did not queue behind refusals is left alone.
+        let (mut conn, statements) = recorded(&file);
+        let permit = crate::file_gate::WritePermit::queued_behind(Duration::ZERO);
+        write_transaction(&mut conn, &permit, |e| e, |_| Ok::<_, String>(())).unwrap();
+        assert_eq!(
+            statements.lock().unwrap()[..2],
+            ["BEGIN IMMEDIATE", "COMMIT"]
+        );
+    }
 }
