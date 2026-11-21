@@ -64,6 +64,16 @@
   its own attempt; time it queued behind attempts refused by such a lock is taken off that
   attempt's busy timeout. A queued writer has no deadline of its own, only the bounded
   writers ahead of it. In-memory databases are not queued.
+- Two effects on connections that share the file but are not these stores (`arc-auth-db`,
+  an application's own pool, `arc-web`'s `get_connection`), compared with 0.9.2:
+  - Under a write-heavy load on a fast file system they get fewer turns. Store writers hand
+    the write slot to each other directly, so the file is seldom free when an outside
+    connection polls for it. Measured on tmpfs, four store writers against one outside
+    writer for 8 seconds: 56 outside writes instead of 231 with a 5-second busy timeout; with
+    500 ms, 62 writes and 10 `database is locked` instead of 335 and 1.
+  - When an outside lock is held longer than the busy timeout, each store writer is held to
+    its own timeout, so more callers can see `database is locked` than before: 10 of 10
+    instead of 2 of 10 were measured in review for a 700 ms lock with a 300 ms timeout.
 
 ## 0.9.2 — 2026-11-19
 

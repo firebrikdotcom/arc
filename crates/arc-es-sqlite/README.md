@@ -76,7 +76,19 @@ Limits:
   same file, still competes through SQLite's busy timeout, and an operation can fail with
   `database is locked` when such a lock outlasts it. A writer always makes its own attempt; the
   time it spent queued behind attempts that such a lock refused is taken off the busy timeout
-  of that attempt, so queueing does not multiply the wait.
+  of that attempt's wait for the write lock, so queueing does not multiply the wait. Its
+  commit keeps the full timeout.
+- Connections outside these stores on the same file (`arc-auth-db`, an application's own pool,
+  `arc-web`'s `get_connection`) get fewer turns under a write-heavy load on a fast file system
+  than they did before the queue: store writers hand the write slot to each other directly, so
+  the file is seldom free when an outside connection polls for it. Measured on tmpfs with four
+  store writers against one outside writer for 8 seconds: 56 outside writes instead of 231 with
+  a 5-second busy timeout; with 500 ms, 62 writes and 10 `database is locked` instead of 335
+  and 1. Give such connections a generous busy timeout, or keep heavy writers off a shared
+  file.
+- When an outside lock is held longer than the busy timeout, each store writer is held to its
+  own timeout, so more callers can see `database is locked` than before the queue (10 of 10
+  instead of 2 of 10 were measured for a 700 ms lock with a 300 ms timeout).
 - The queue orders callers and leaves the locking to SQLite. A read that is still running after
   the 20 ms (a long read, or one waiting for a transaction that outgrew the page cache and
   holds the file exclusively) is arbitrated by SQLite's busy timeout as before.

@@ -76,6 +76,12 @@ take precedence when a claim here becomes stale.
   waited longer than 303 ms). Without any such rule
   `external_writer_exhausts_bounded_timeout_and_pools_recover` takes 10.0 s and fails.
   The access journal no longer holds readers back.
+- Second review (2026-11-20): approved. The shortened busy timeout now covers only
+  `BEGIN IMMEDIATE`, so a commit keeps the full timeout. Two accepted costs against 0.9.2 are
+  stated in the changelog and the crate README: outside connections on the same file get
+  fewer turns under write-heavy load on fast file systems, and with an outside lock longer
+  than the busy timeout more store callers see `database is locked`. Open follow-up: the
+  pool's liveness check on checkout runs outside the queue.
 - Limits: fairness is per process. Other processes and connections opened outside these stores
   (`arc-auth-db`, and `arc-web`'s `get_connection` pool that the reference application's
   migration command uses) still compete through the busy timeout, as does a read that outlasts

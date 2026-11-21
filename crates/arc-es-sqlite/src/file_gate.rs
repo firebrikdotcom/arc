@@ -45,7 +45,8 @@
 //!   opened outside these stores, still competes through SQLite's busy
 //!   handler, so the busy timeout stays the bound for that contention. Time a
 //!   writer spent queued behind attempts that such a lock refused is taken
-//!   off the busy timeout of its own attempt, which it always makes.
+//!   off the busy timeout of its own attempt at the write lock, which it
+//!   always makes; its commit keeps the full timeout.
 //! - In-memory and temporary databases have no file name and are not gated.
 //! - A permit is taken on the blocking thread and released on it; it is never
 //!   held across an `await`. An operation nested inside another on the same
@@ -455,6 +456,21 @@ impl WritePermit {
     fn ungated() -> Self {
         Self {
             held: None,
+            _on_this_thread: PhantomData,
+        }
+    }
+
+    /// A permit on a gate of its own that queued `behind_refusals`.
+    #[cfg(test)]
+    pub(crate) fn queued_behind(behind_refusals: Duration) -> Self {
+        let gate = Arc::new(Gate::default());
+        gate.begin_write();
+        Self {
+            held: Some(Held {
+                gate,
+                readers_gated: true,
+                queued_behind_refusals: behind_refusals,
+            }),
             _on_this_thread: PhantomData,
         }
     }
