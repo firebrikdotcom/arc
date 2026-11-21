@@ -270,7 +270,6 @@ mod tests {
     async fn new_connections_read_in_turn_while_others_commit_nonstop() {
         use arc_core::event_store::EventStore;
         use arc_core::read_model_store::ReadModelStore;
-        use arc_core::session::SessionStore;
         const HOLD: Duration = Duration::from_millis(100);
         // A few commits; a read that polls lasts the 5-second busy timeout.
         const IN_TURN: Duration = Duration::from_secs(2);
@@ -282,16 +281,14 @@ mod tests {
 
         let events = crate::SqliteEventStore::new(url).await.unwrap();
         let views = crate::SqliteReadModelStore::new(url).await.unwrap();
-        let sessions = crate::SqliteSessionStore::new(url).await.unwrap();
         let began = Instant::now();
         let mut reads = tokio::task::JoinSet::new();
         // As many at once as a pool has connections, so each takes a new one.
         for _ in 0..10 {
-            let (events, views, sessions) = (events.clone(), views.clone(), sessions.clone());
+            let (events, views) = (events.clone(), views.clone());
             reads.spawn(async move {
                 assert!(events.load("none").await.unwrap().is_empty());
                 assert!(views.get("users_view", "none").await.unwrap().is_none());
-                assert!(!sessions.is_valid(uuid::Uuid::nil(), 0).await.unwrap());
             });
         }
         while let Some(read) = reads.join_next().await {

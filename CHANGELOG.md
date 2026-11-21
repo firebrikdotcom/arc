@@ -18,6 +18,10 @@
   3 runs): the first `get` on a fresh `SqliteReadModelStore::new` took at most 8.4, 6.0 and
   4.0 s before, with 8 of 15 attempts over 500 ms, and at most 7.8, 21.9 and 36.7 ms after,
   with none over 500 ms.
+- `arc-es-sqlite`: `SqliteAccessLogger` prepares each new connection (`PRAGMA synchronous`,
+  which also loads the schema) after taking its turn as a writer instead of before, so a
+  journal that shares a database file with other writers of the process no longer fails with
+  a sink error on its busy timeout while they commit one after another.
 - Limit: a pool passed to `with_pool` keeps the caller's policy. With r2d2's default
   `test_on_check_out(true)`, each new connection's `SELECT 1` still runs outside the queue and
   can stall up to the connection's busy timeout. Build such a pool with

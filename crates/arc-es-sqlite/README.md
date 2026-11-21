@@ -78,7 +78,11 @@ with SQLite's unfair busy retry and could stall for seconds. Pools built by the 
 now lend connections without r2d2's check-out test, and the journal mode is asked as a queued
 read, so the first read on a new store, or on a replacement connection, waits for one commit
 like any queued read. Losing the check-out test loses nothing: SQLite connections do not go
-stale, and Diesel still has r2d2 discard a connection left in a broken transaction. Measured
+stale, and Diesel still has r2d2 discard a connection left in a broken transaction.
+`SqliteAccessLogger`, which opens a connection for each operation, now prepares it
+(`PRAGMA synchronous`, which loads the schema too) after it has taken its turn as a writer, so a
+journal that shares a file with other writers no longer fails on its short busy timeout while
+they commit. Measured
 with 4 tasks appending nonstop for 12 seconds through one `SqliteEventStore` (rollback journal,
 btrfs on a real disk, 3 runs, debug build), the first `get` on a fresh
 `SqliteReadModelStore::new` took at most 8.4 s, 6.0 s and 4.0 s before, with 8 of 15 attempts

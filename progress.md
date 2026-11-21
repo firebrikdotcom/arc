@@ -40,7 +40,9 @@ take precedence when a claim here becomes stale.
 - Fix (`crates/arc-es-sqlite`, commit cec265d): pools built by the stores (`new`) lend connections
   without r2d2's check-out test (`connection::pool_builder`), and the journal mode is asked as a
   queued read under a read permit. SQLite connections do not go stale and Diesel still has r2d2
-  discard a connection left in a broken transaction. No public API change.
+  discard a connection left in a broken transaction. No public API change. Found in review:
+  `SqliteAccessLogger` set `PRAGMA synchronous` (which loads the schema) on each new connection
+  before taking the write slot; it now does so after, in its turn.
 - Measured (4 tasks appending nonstop for 12 s through one `SqliteEventStore`, rollback journal,
   btrfs on a real disk, 3 runs, debug build): first `get` on a fresh `SqliteReadModelStore::new`,
   before max 8.4 / 6.0 / 4.0 s with 8 of 15 attempts over 500 ms; after max 7.8 / 21.9 / 36.7 ms

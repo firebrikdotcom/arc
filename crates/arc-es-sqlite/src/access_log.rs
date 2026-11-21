@@ -98,15 +98,19 @@ impl SqliteAccessLogger {
             options.open(path.as_ref()).map_err(|_| sink_error())?;
             let mut conn = SqliteConnection::establish(path.to_str().ok_or_else(sink_error)?)
                 .map_err(|_| sink_error())?;
-            conn.batch_execute(&format!(
-                "PRAGMA busy_timeout={timeout}; PRAGMA synchronous=FULL;"
-            ))
-            .map_err(|_| sink_error())?;
+            conn.batch_execute(&format!("PRAGMA busy_timeout={timeout};"))
+                .map_err(|_| sink_error())?;
             // Every operation of this journal writes. Take turns with any
             // other writer of the same file in this process (another logger
             // opened on the path, or a store sharing the file). The journal
             // has no readers among the stores, so none are held back.
             let _write_slot = gate.write_on(&mut conn);
+            // Setting `synchronous` loads the schema, under a shared lock on
+            // the file, and this connection is new: it waits for its turn
+            // like the write it prepares, instead of polling for the lock
+            // against the commits of the other writers.
+            conn.batch_execute("PRAGMA synchronous=FULL;")
+                .map_err(|_| sink_error())?;
             operation(&mut conn)
         })
         .await
@@ -294,6 +298,22 @@ mod tests {
             err.to_string(),
             "access log sink failed: sqlite access journal operation failed"
         );
+    }
+    /// Each operation opens a connection, whose first schema-loading
+    /// statement must wait in the queue: the journal's busy timeout is far
+    /// shorter than the commits it shares the file with.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_journal_sharing_a_file_writes_in_turn_while_others_commit_nonstop() {
+        let journal = Journal::new();
+        let hold = std::time::Duration::from_millis(100);
+        let commits = crate::test_support::SlowCommits::start(journal.0.to_str().unwrap(), 2, hold);
+        tokio::time::sleep(hold * 2).await;
+        let logger = journal.open().await;
+        for _ in 0..5 {
+            write(&logger).await.unwrap();
+        }
+        assert!(commits.stop() >= 4);
+        assert_eq!(journal.entries().len(), 5);
     }
     #[tokio::test]
     async fn oversized_metadata_is_rejected_without_persistence() {
