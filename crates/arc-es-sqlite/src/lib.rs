@@ -386,7 +386,7 @@ impl SqliteEventStore {
 
     pub async fn new(database_url: &str) -> EventStoreResult<Self> {
         let manager = ConnectionManager::<SqliteConnection>::new(database_url);
-        let pool = Pool::builder()
+        let pool = connection::pool_builder()
             .max_size(10)
             .connection_customizer(Box::new(connection::BusyTimeout))
             .build(manager)
@@ -2213,5 +2213,19 @@ mod connection_tests {
         super::connection::assert_timeout_on_replacement(&store.pool);
         drop(store);
         std::fs::remove_file(path).unwrap();
+    }
+
+    /// The store's own pool lends connections without r2d2's `SELECT 1`
+    /// (see `connection::pool_builder`); a pool passed in keeps its policy.
+    #[tokio::test]
+    async fn only_the_store_owned_pool_lends_without_testing_the_connection() {
+        let store = super::SqliteEventStore::new(":memory:").await.unwrap();
+        assert!(!store.pool.test_on_check_out());
+        let injected = diesel::r2d2::Pool::builder()
+            .max_size(1)
+            .build(super::ConnectionManager::new(":memory:"))
+            .unwrap();
+        let store = super::SqliteEventStore::with_pool(injected);
+        assert!(store.pool.test_on_check_out());
     }
 }

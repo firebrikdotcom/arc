@@ -307,7 +307,14 @@ struct JournalMode {
 /// `file:` URI opened it, and an empty name for in-memory and temporary
 /// databases. `Err` means the question could not be asked; `Ok(None)` means
 /// no file.
-fn describe(conn: &mut SqliteConnection) -> QueryResult<Option<Target>> {
+///
+/// The file name needs no lock, but the journal mode does: on a new
+/// connection it is the first statement that loads the schema, which takes a
+/// shared lock on the file. Asked outside the queue, it would poll for that
+/// lock against one commit after another and could lose every time until the
+/// busy timeout, so it is asked as a read of the file, under the permit
+/// returned with the answer.
+fn describe(conn: &mut SqliteConnection) -> QueryResult<Option<(Target, ReadPermit)>> {
     let file = diesel::sql_query("PRAGMA database_list")
         .load::<Attached>(conn)?
         .into_iter()
@@ -317,14 +324,17 @@ fn describe(conn: &mut SqliteConnection) -> QueryResult<Option<Target>> {
     let Some(file) = file else {
         return Ok(None);
     };
+    let file = PathBuf::from(file);
+    let gate = gate_for(std::fs::canonicalize(&file).unwrap_or(file));
+    let probing = admit_reader(&gate);
     let journal_mode = diesel::sql_query("PRAGMA journal_mode")
         .get_result::<JournalMode>(conn)?
         .journal_mode;
-    let file = PathBuf::from(file);
-    Ok(Some(Target {
-        gate: gate_for(std::fs::canonicalize(&file).unwrap_or(file)),
+    let target = Target {
+        gate,
         readers_gated: !journal_mode.eq_ignore_ascii_case("wal"),
-    }))
+    };
+    Ok(Some((target, probing)))
 }
 
 type ConnectionPool = Pool<ConnectionManager<SqliteConnection>>;
@@ -348,16 +358,17 @@ impl FileGate {
     /// could be waiting for the very writer whose commit waits for it.
     pub(crate) fn read(&self, conn: &mut SqliteConnection) -> ReadPermit {
         if self.target.get().is_none() {
-            self.resolve(conn);
+            // The read goes on under the permit it was resolved under.
+            let probing = self.resolve(conn);
+            if probing.0.is_some() {
+                return probing;
+            }
         }
         let target = self.target.get().and_then(|target| target.as_ref());
-        let Some(target) = target.filter(|target| target.readers_gated && !inside(&target.gate))
-        else {
+        let Some(target) = target.filter(|target| target.readers_gated) else {
             return ReadPermit(None, PhantomData);
         };
-        target.gate.begin_read();
-        enter(&target.gate);
-        ReadPermit(Some(target.gate.clone()), PhantomData)
+        admit_reader(&target.gate)
     }
 
     /// Queue for the write slot of the database file behind `pool`. Call it
@@ -368,7 +379,7 @@ impl FileGate {
             // If no connection can be had, the operation itself reports that.
             // The connection goes back to the pool before queueing.
             if let Ok(mut conn) = pool.get() {
-                self.resolve(&mut conn);
+                drop(self.resolve(&mut conn));
             }
         }
         self.admit_writer()
@@ -377,17 +388,30 @@ impl FileGate {
     /// As [`write`](Self::write), for a writer that owns its connection.
     pub(crate) fn write_on(&self, conn: &mut SqliteConnection) -> WritePermit {
         if self.target.get().is_none() {
-            self.resolve(conn);
+            drop(self.resolve(conn));
         }
         self.admit_writer()
     }
 
     /// If the connection cannot be asked, this operation runs ungated and
-    /// the next one asks again.
-    fn resolve(&self, conn: &mut SqliteConnection) {
-        if let Ok(target) = describe(conn) {
-            let _ = self.target.set(target);
+    /// the next one asks again. Returns the permit the question was asked
+    /// under while reads of the file are gated; a writer drops it before it
+    /// queues for the write slot.
+    fn resolve(&self, conn: &mut SqliteConnection) -> ReadPermit {
+        match describe(conn) {
+            Ok(Some((target, probing))) => {
+                let gated = target.readers_gated;
+                let _ = self.target.set(Some(target));
+                if gated {
+                    return probing;
+                }
+            }
+            Ok(None) => {
+                let _ = self.target.set(None);
+            }
+            Err(_) => {}
         }
+        ReadPermit(None, PhantomData)
     }
 
     fn admit_writer(&self) -> WritePermit {
@@ -408,6 +432,16 @@ impl FileGate {
             _on_this_thread: PhantomData,
         }
     }
+}
+
+/// Admit a read of `gate`'s file, unless this thread is inside it already.
+fn admit_reader(gate: &Arc<Gate>) -> ReadPermit {
+    if inside(gate) {
+        return ReadPermit(None, PhantomData);
+    }
+    gate.begin_read();
+    enter(gate);
+    ReadPermit(Some(gate.clone()), PhantomData)
 }
 
 fn inside(gate: &Arc<Gate>) -> bool {
@@ -808,6 +842,56 @@ mod tests {
         }
     }
 
+    /// On a new connection the journal mode is the first statement to load
+    /// the schema, under a shared lock on the file, so it is asked in turn,
+    /// as a read: during a commit it waits for the commit to end, and the
+    /// read that asked goes on under the same permit. A writer gives the
+    /// permit up before it queues for the slot.
+    #[test]
+    fn the_journal_mode_is_asked_in_turn() {
+        use diesel::connection::InstrumentationEvent;
+        let dir = Dir::new();
+        let pool = dir.pool();
+        // Another store's writer is committing.
+        let committer = FileGate::new();
+        let committing = committer.write(&pool);
+        committing.exclude_readers();
+        let gate = gate_of(&committer);
+
+        let asked = Arc::new(AtomicBool::new(false));
+        let mut conn = pool.get().unwrap();
+        let asking = asked.clone();
+        conn.set_instrumentation(move |event: InstrumentationEvent<'_>| {
+            if let InstrumentationEvent::StartQuery { query, .. } = event {
+                if query.to_string().contains("journal_mode") {
+                    asking.store(true, Ordering::SeqCst);
+                }
+            }
+        });
+        let (read_tx, read_rx) = mpsc::channel();
+        let (finish_tx, finish_rx) = mpsc::channel::<()>();
+        let reader = std::thread::spawn(move || {
+            let reading = FileGate::new().read(&mut conn);
+            read_tx.send(reading.0.is_some()).unwrap();
+            finish_rx.recv_timeout(NEVER).unwrap();
+        });
+        until(&gate, |state| state.parked.len() == 1);
+        assert!(!asked.load(Ordering::SeqCst), "asked during the commit");
+        drop(committing);
+        assert!(read_rx.recv_timeout(NEVER).unwrap(), "the read is gated");
+        assert!(asked.load(Ordering::SeqCst));
+        assert_eq!(gate.state().readers, 1, "one permit, for both");
+        finish_tx.send(()).unwrap();
+        reader.join().unwrap();
+        assert_eq!(gate.state().readers, 0);
+
+        let writing = FileGate::new().write(&pool);
+        let state = gate.state();
+        assert!(state.writer && state.readers == 0);
+        drop(state);
+        drop(writing);
+    }
+
     #[test]
     fn wal_readers_are_not_gated_and_commits_do_not_wait_for_them() {
         let dir = Dir::new();
@@ -819,6 +903,8 @@ mod tests {
         let file_gate = FileGate::new();
         let reading = file_gate.read(&mut pool.get().unwrap());
         assert!(reading.0.is_none());
+        // Nor is the read that asked the journal mode left counted.
+        assert_eq!(gate_of(&file_gate).state().readers, 0);
         // Writers still take turns.
         let writing = file_gate.write(&pool);
         let gate = gate_of(&file_gate);

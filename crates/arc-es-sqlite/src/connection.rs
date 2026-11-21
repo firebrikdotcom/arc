@@ -1,11 +1,25 @@
 //! Shared connection policy for store-owned pools. Injected pools keep their policy.
 use diesel::connection::{AnsiTransactionManager, SimpleConnection, TransactionManager};
-use diesel::r2d2::{CustomizeConnection, Error};
+use diesel::r2d2::{ConnectionManager, CustomizeConnection, Error};
 use diesel::SqliteConnection;
 
 /// Maximum SQLite lock wait per statement on every store-owned connection,
 /// including replacements. This changes neither journal mode nor durability.
 pub(crate) const BUSY_TIMEOUT_MS: u32 = 5_000;
+
+/// The builder of every store-owned pool. r2d2 would test each connection it
+/// lends with `SELECT 1`, before the store can queue for the file. On a new
+/// connection, including a replacement, that is the first statement, the one
+/// that loads the schema under a shared lock on the file: outside the queue
+/// it polls for the lock against one commit after another, can lose every
+/// time until the busy timeout, and then r2d2 discards the connection and
+/// tries another. Without the test the first statement is the store's own,
+/// under its turn. The test would catch nothing here: a SQLite connection
+/// does not go stale, and Diesel already has r2d2 discard a connection left
+/// in a broken transaction.
+pub(crate) fn pool_builder() -> diesel::r2d2::Builder<ConnectionManager<SqliteConnection>> {
+    diesel::r2d2::Pool::builder().test_on_check_out(false)
+}
 
 #[derive(Debug)]
 pub(crate) struct BusyTimeout;
@@ -153,7 +167,7 @@ mod tests {
     use diesel::connection::InstrumentationEvent;
     use diesel::prelude::*;
     use std::sync::{Arc, Mutex};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     struct File(std::path::PathBuf);
     impl File {
@@ -245,6 +259,73 @@ mod tests {
             ["PRAGMA busy_timeout = 0", "BEGIN IMMEDIATE"]
         );
         assert_eq!(busy_timeout(&mut conn), 300);
+    }
+
+    /// The first statement on a new connection loads the schema, which needs
+    /// a shared lock on the file. Outside the queue it polls for that lock
+    /// against one commit after another and can lose every time until the
+    /// busy timeout; in the queue it waits for one commit. Every connection of
+    /// a new store is new, and so is a replacement.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn new_connections_read_in_turn_while_others_commit_nonstop() {
+        use arc_core::event_store::EventStore;
+        use arc_core::read_model_store::ReadModelStore;
+        use arc_core::session::SessionStore;
+        const HOLD: Duration = Duration::from_millis(100);
+        // A few commits; a read that polls lasts the 5-second busy timeout.
+        const IN_TURN: Duration = Duration::from_secs(2);
+        let file = File::new();
+        crate::test_support::migrate(&mut file.connect());
+        let url = file.0.to_str().unwrap();
+        let commits = crate::test_support::SlowCommits::start(url, 2, HOLD);
+        tokio::time::sleep(HOLD * 2).await;
+
+        let events = crate::SqliteEventStore::new(url).await.unwrap();
+        let views = crate::SqliteReadModelStore::new(url).await.unwrap();
+        let sessions = crate::SqliteSessionStore::new(url).await.unwrap();
+        let began = Instant::now();
+        let mut reads = tokio::task::JoinSet::new();
+        // As many at once as a pool has connections, so each takes a new one.
+        for _ in 0..10 {
+            let (events, views, sessions) = (events.clone(), views.clone(), sessions.clone());
+            reads.spawn(async move {
+                assert!(events.load("none").await.unwrap().is_empty());
+                assert!(views.get("users_view", "none").await.unwrap().is_none());
+                assert!(!sessions.is_valid(uuid::Uuid::nil(), 0).await.unwrap());
+            });
+        }
+        while let Some(read) = reads.join_next().await {
+            read.unwrap();
+        }
+        let first = began.elapsed();
+
+        // Returning a connection with an open transaction makes r2d2 discard
+        // it; with the others held, the next read gets its replacement.
+        let pool = events.pool.clone();
+        let held = tokio::task::spawn_blocking(move || {
+            let mut held: Vec<_> = (0..10).map(|_| pool.get().unwrap()).collect();
+            let mut discarded = held.pop().unwrap();
+            AnsiTransactionManager::begin_transaction(&mut *discarded).unwrap();
+            drop(discarded);
+            held
+        })
+        .await
+        .unwrap();
+        let began = Instant::now();
+        assert!(events.load("none").await.unwrap().is_empty());
+        let replacement = began.elapsed();
+        drop(held);
+
+        let made = commits.stop();
+        assert!(
+            first < IN_TURN,
+            "first reads polled for the file: {first:?}"
+        );
+        assert!(
+            replacement < IN_TURN,
+            "a replacement connection polled for the file: {replacement:?}"
+        );
+        assert!(made >= 4, "the commits stopped: {made}");
     }
 
     #[test]
