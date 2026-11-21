@@ -2,7 +2,30 @@
 
 ## Unreleased
 
-## 0.9.3 — 2026-11-19
+## 0.9.4 — 2026-11-21
+
+### Fixed
+
+- `arc-es-sqlite`: the first read on a new store, or on a replacement connection, no longer
+  stalls for seconds under nonstop commits in rollback-journal mode. The first statement on a
+  connection loads the schema and needs a shared lock on the file; it ran outside the queue
+  (r2d2's `SELECT 1` check at check-out, and the stores' question about the journal mode), so
+  it polled with SQLite's unfair busy retry. Pools built by the stores (`new`) now lend
+  connections without r2d2's check-out test, and the journal mode is asked as a queued read,
+  so that first read waits for one commit like any queued read. SQLite connections do not go
+  stale, and Diesel still has r2d2 discard a connection left in a broken transaction.
+  Measured with four tasks appending nonstop for 12 seconds (rollback journal, real disk,
+  3 runs): the first `get` on a fresh `SqliteReadModelStore::new` took at most 8.4, 6.0 and
+  4.0 s before, with 8 of 15 attempts over 500 ms, and at most 7.8, 21.9 and 36.7 ms after,
+  with none over 500 ms.
+- Limit: a pool passed to `with_pool` keeps the caller's policy. With r2d2's default
+  `test_on_check_out(true)`, each new connection's `SELECT 1` still runs outside the queue and
+  can stall up to the connection's busy timeout. Build such a pool with
+  `test_on_check_out(false)` when the file is shared with heavy writers. Connections opened
+  outside the stores are unchanged. No public API, journal mode, durability or busy-timeout
+  setting changes.
+
+## 0.9.3 — 2026-11-21
 
 ### Security
 
