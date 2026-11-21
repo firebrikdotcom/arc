@@ -291,105 +291,92 @@ impl SqliteEventStore {
         let integrity = self.integrity.clone();
 
         tokio::task::spawn_blocking(move || -> EventStoreResult<()> {
-            use diesel::connection::AnsiTransactionManager;
-            use diesel::connection::TransactionManager;
-
             // Queue fairly behind this process's other writers of the file;
             // SQLite's own busy retry is left to contention from outside.
-            let permit = gate
-                .write(&pool)
-                .map_err(|e| EventStoreError::database(e.to_string()))?;
+            let permit = gate.write(&pool);
 
             let mut conn = pool.get().map_err(|e| {
                 EventStoreError::database(format!("Failed to get connection: {}", e))
             })?;
 
-            let result = (|| -> EventStoreResult<()> {
-                // Reserve the writer before reading the version: a deferred read-to-write
-                // upgrade can fail immediately even with a busy timeout.
-                AnsiTransactionManager::begin_transaction_sql(&mut *conn, "BEGIN IMMEDIATE")
-                    .map_err(|e| EventStoreError::database(e.to_string()))?;
+            // The writer is reserved before the version is read.
+            let result = connection::write_transaction(
+                &mut conn,
+                &permit,
+                EventStoreError::database,
+                |conn| -> EventStoreResult<()> {
+                    let current_version = events::table
+                        .filter(events::aggregate_type.eq(&aggregate_type))
+                        .filter(events::aggregate_id.eq(&aggregate_id))
+                        .select(diesel::dsl::max(events::sequence))
+                        .first::<Option<i64>>(&mut *conn)
+                        .map_err(|e| EventStoreError::database(e.to_string()))?
+                        .unwrap_or(0);
 
-                let current_version = events::table
-                    .filter(events::aggregate_type.eq(&aggregate_type))
-                    .filter(events::aggregate_id.eq(&aggregate_id))
-                    .select(diesel::dsl::max(events::sequence))
-                    .first::<Option<i64>>(&mut *conn)
-                    .map_err(|e| EventStoreError::database(e.to_string()))?
-                    .unwrap_or(0);
-
-                if let Some(expected) = version_check.version() {
-                    if current_version != expected {
-                        return Err(EventStoreError::ConcurrencyConflict {
-                            aggregate_id: aggregate_id.clone(),
-                            expected,
-                            actual: current_version,
-                        });
-                    }
-                }
-
-                for (expected_sequence, event) in (current_version + 1..).zip(new_events.iter()) {
-                    if event.sequence != expected_sequence {
-                        return Err(EventStoreError::InvalidSequence {
-                            aggregate_id: aggregate_id.clone(),
-                            expected: expected_sequence,
-                            actual: event.sequence,
-                        });
-                    }
-                }
-
-                let mut previous_signature = if integrity.is_some() {
-                    previous_signature_for_aggregate(
-                        &mut conn,
-                        Some(&aggregate_type),
-                        &aggregate_id,
-                        current_version + 1,
-                    )?
-                } else {
-                    EventSignature::genesis()
-                };
-
-                for event in &new_events {
-                    let mut record = NewEventRecord::from_event(event, None, None)?;
-
-                    if let Some(integrity) = integrity.as_ref() {
-                        let mut persisted_event = event.clone();
-                        persisted_event.timestamp = (record.timestamp as u64) * 1000;
-                        let signature = integrity
-                            .chain
-                            .sign_event(&previous_signature, &persisted_event)
-                            .map_err(EventStoreError::from)?;
-                        previous_signature = signature.clone();
-                        record.integrity_signature = Some(signature.0);
-                        record.integrity_key_id = Some(integrity.key_id.clone());
+                    if let Some(expected) = version_check.version() {
+                        if current_version != expected {
+                            return Err(EventStoreError::ConcurrencyConflict {
+                                aggregate_id: aggregate_id.clone(),
+                                expected,
+                                actual: current_version,
+                            });
+                        }
                     }
 
-                    diesel::insert_into(events::table)
-                        .values(&record)
-                        .execute(&mut *conn)
-                        .map_err(|e| EventStoreError::database(e.to_string()))?;
-                    if queue_publication {
-                        diesel::sql_query("INSERT INTO event_publications (event_id) VALUES (?)")
+                    for (expected_sequence, event) in (current_version + 1..).zip(new_events.iter())
+                    {
+                        if event.sequence != expected_sequence {
+                            return Err(EventStoreError::InvalidSequence {
+                                aggregate_id: aggregate_id.clone(),
+                                expected: expected_sequence,
+                                actual: event.sequence,
+                            });
+                        }
+                    }
+
+                    let mut previous_signature = if integrity.is_some() {
+                        previous_signature_for_aggregate(
+                            conn,
+                            Some(&aggregate_type),
+                            &aggregate_id,
+                            current_version + 1,
+                        )?
+                    } else {
+                        EventSignature::genesis()
+                    };
+
+                    for event in &new_events {
+                        let mut record = NewEventRecord::from_event(event, None, None)?;
+
+                        if let Some(integrity) = integrity.as_ref() {
+                            let mut persisted_event = event.clone();
+                            persisted_event.timestamp = (record.timestamp as u64) * 1000;
+                            let signature = integrity
+                                .chain
+                                .sign_event(&previous_signature, &persisted_event)
+                                .map_err(EventStoreError::from)?;
+                            previous_signature = signature.clone();
+                            record.integrity_signature = Some(signature.0);
+                            record.integrity_key_id = Some(integrity.key_id.clone());
+                        }
+
+                        diesel::insert_into(events::table)
+                            .values(&record)
+                            .execute(&mut *conn)
+                            .map_err(|e| EventStoreError::database(e.to_string()))?;
+                        if queue_publication {
+                            diesel::sql_query(
+                                "INSERT INTO event_publications (event_id) VALUES (?)",
+                            )
                             .bind::<diesel::sql_types::Text, _>(event.event_id.to_string())
                             .execute(&mut *conn)
                             .map_err(|e| EventStoreError::database(e.to_string()))?;
+                        }
                     }
-                }
 
-                Ok(())
-            })();
-
-            // Preserve the body/commit error. COMMIT can fail (for example while
-            // an external reader holds a shared lock) and leave a transaction open.
-            let result = result.and_then(|()| {
-                // Readers of this process are held back only for the commit.
-                permit.exclude_readers();
-                AnsiTransactionManager::commit_transaction(&mut *conn)
-                    .map_err(|e| EventStoreError::database(e.to_string()))
-            });
-            if result.is_err() {
-                connection::rollback_append(&mut conn);
-            }
+                    Ok(())
+                },
+            );
             permit.finish(&result);
             result
         })
@@ -665,9 +652,7 @@ impl EventStore for SqliteEventStore {
         let pool = self.pool.clone();
         let gate = self.gate.clone();
         tokio::task::spawn_blocking(move || -> EventStoreResult<()> {
-            let permit = gate
-                .write(&pool)
-                .map_err(|e| EventStoreError::database(e.to_string()))?;
+            let permit = gate.write(&pool);
             let mut conn = pool
                 .get()
                 .map_err(|e| EventStoreError::database(e.to_string()))?;
@@ -936,9 +921,7 @@ impl EventStore for SqliteEventStore {
         let gate = self.gate.clone();
 
         tokio::task::spawn_blocking(move || -> EventStoreResult<()> {
-            let permit = gate
-                .write(&pool)
-                .map_err(|e| EventStoreError::database(e.to_string()))?;
+            let permit = gate.write(&pool);
             let mut conn = pool.get().map_err(|e| {
                 EventStoreError::database(format!("Failed to get connection: {}", e))
             })?;

@@ -132,9 +132,7 @@ impl ReadModelStore for SqliteReadModelStore {
         let key = op.key.clone();
 
         tokio::task::spawn_blocking(move || -> ReadModelResult<()> {
-            let permit = gate
-                .write(&pool)
-                .map_err(|e| ReadModelError::write_failed(e.to_string()))?;
+            let permit = gate.write(&pool);
             let mut conn = pool.get().map_err(|e| {
                 ReadModelError::write_failed(format!("Failed to get connection: {e}"))
             })?;
@@ -174,9 +172,7 @@ impl ReadModelStore for SqliteReadModelStore {
         let key = key.to_string();
 
         tokio::task::spawn_blocking(move || -> ReadModelResult<()> {
-            let permit = gate
-                .write(&pool)
-                .map_err(|e| ReadModelError::write_failed(e.to_string()))?;
+            let permit = gate.write(&pool);
             let mut conn = pool.get().map_err(|e| {
                 ReadModelError::write_failed(format!("Failed to get connection: {e}"))
             })?;
@@ -340,9 +336,7 @@ impl ReadModelStore for SqliteReadModelStore {
         let table = table.to_string();
 
         tokio::task::spawn_blocking(move || -> ReadModelResult<()> {
-            let permit = gate
-                .write(&pool)
-                .map_err(|e| ReadModelError::schema_failed(e.to_string()))?;
+            let permit = gate.write(&pool);
             let mut conn = pool.get().map_err(|e| {
                 ReadModelError::schema_failed(format!("Failed to get connection: {e}"))
             })?;

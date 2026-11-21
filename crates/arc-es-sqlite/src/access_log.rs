@@ -102,11 +102,11 @@ impl SqliteAccessLogger {
                 "PRAGMA busy_timeout={timeout}; PRAGMA synchronous=FULL;"
             ))
             .map_err(|_| sink_error())?;
-            // Every operation of this journal writes. Queue fairly behind any
-            // other user of the same file in this process (another logger
-            // opened on the path, or a store sharing the file).
-            let admitted = gate.write_on(&mut conn).map_err(|_| sink_error())?;
-            admitted.exclude_readers();
+            // Every operation of this journal writes. Take turns with any
+            // other writer of the same file in this process (another logger
+            // opened on the path, or a store sharing the file). The journal
+            // has no readers among the stores, so none are held back.
+            let _write_slot = gate.write_on(&mut conn);
             operation(&mut conn)
         })
         .await

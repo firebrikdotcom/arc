@@ -101,9 +101,7 @@ where
     T: Send + 'static,
 {
     run_blocking(move || {
-        let permit = gate
-            .write(&pool)
-            .map_err(|e| SessionStoreError::Sink(e.to_string()))?;
+        let permit = gate.write(&pool);
         let mut conn = pool
             .get()
             .map_err(|e| SessionStoreError::Sink(format!("conn: {e}")))?;

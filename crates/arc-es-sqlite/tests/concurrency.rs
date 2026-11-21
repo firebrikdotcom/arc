@@ -259,6 +259,127 @@ async fn one_connection_pool_serves_readers_and_writers_without_stalling() {
     assert_eq!(views.list("users_view").await.unwrap().len(), 40);
 }
 
+/// A transaction that outgrows SQLite's page cache takes the exclusive lock
+/// before it commits, so readers already admitted wait for it inside SQLite.
+/// The writer must not wait for those readers in turn.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn transaction_larger_than_the_page_cache_does_not_stall_on_its_own_readers() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let db = Database::new();
+    let events = SqliteEventStore::new(db.url()).await.unwrap();
+    let (done, reads, failed) = (
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(AtomicUsize::new(0)),
+        Arc::new(AtomicUsize::new(0)),
+    );
+    let mut readers = Vec::new();
+    for _ in 0..4 {
+        let (events, done, reads, failed) =
+            (events.clone(), done.clone(), reads.clone(), failed.clone());
+        readers.push(tokio::spawn(async move {
+            while !done.load(Ordering::SeqCst) {
+                if events.get_version("large").await.is_err() {
+                    failed.fetch_add(1, Ordering::SeqCst);
+                }
+                reads.fetch_add(1, Ordering::SeqCst);
+            }
+        }));
+    }
+    // Eight megabytes against a default page cache of two.
+    let megabyte = "x".repeat(1 << 20);
+    let batch = (1..=8)
+        .map(|sequence| {
+            let mut event = event("large", sequence);
+            event.payload = serde_json::json!({ "value": megabyte });
+            event
+        })
+        .collect();
+    let began = Instant::now();
+    events
+        .append("large", VersionCheck::New, batch)
+        .await
+        .unwrap();
+    let appended = began.elapsed();
+    done.store(true, Ordering::SeqCst);
+    for reader in readers {
+        reader.await.unwrap();
+    }
+    assert_eq!(failed.load(Ordering::SeqCst), 0, "readers reported errors");
+    assert!(reads.load(Ordering::SeqCst) > 0);
+    // Stalled, it would last the readers' whole busy timeout of 5 seconds.
+    assert!(
+        appended < Duration::from_millis(2_500),
+        "append waited for readers that were waiting for it: {appended:?}"
+    );
+    assert_eq!(events.get_version("large").await.unwrap(), 8);
+}
+
+/// In WAL mode readers and writers do not block each other in SQLite, so the
+/// stores must not make them wait for each other either.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn wal_write_does_not_wait_for_a_running_read() {
+    use diesel::connection::InstrumentationEvent;
+    use diesel::r2d2::{ConnectionManager, Pool};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
+    let db = Database::new();
+    db.connect()
+        .batch_execute("PRAGMA journal_mode = WAL")
+        .unwrap();
+    let pool = || {
+        Pool::builder()
+            .max_size(1)
+            .build(ConnectionManager::<SqliteConnection>::new(db.url()))
+            .unwrap()
+    };
+    // One store's only connection stops inside its read until released.
+    let reading = pool();
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let released = Arc::new(AtomicBool::new(false));
+    {
+        let released = released.clone();
+        let mut conn = reading.get().unwrap();
+        conn.batch_execute("PRAGMA busy_timeout = 5000").unwrap();
+        conn.set_instrumentation(move |event: InstrumentationEvent<'_>| {
+            if let InstrumentationEvent::StartQuery { query, .. } = event {
+                if query.to_string().contains("FROM `events`") {
+                    started_tx.send(()).unwrap();
+                    let outcome = release_rx.recv_timeout(Duration::from_secs(10));
+                    released.store(outcome.is_ok(), Ordering::SeqCst);
+                }
+            }
+        });
+    }
+    let reader = SqliteEventStore::with_pool(reading);
+    let writing = pool();
+    writing
+        .get()
+        .unwrap()
+        .batch_execute("PRAGMA busy_timeout = 5000")
+        .unwrap();
+    let writer = SqliteEventStore::with_pool(writing.clone());
+    let views = SqliteReadModelStore::with_pool(writing);
+
+    let read = tokio::spawn(async move { reader.stream_all(0).await });
+    tokio::task::spawn_blocking(move || started_rx.recv_timeout(Duration::from_secs(10)))
+        .await
+        .unwrap()
+        .expect("the read started");
+    // Both kinds of write finish while the read is still running.
+    writer
+        .append("wal", VersionCheck::New, vec![event("wal", 1)])
+        .await
+        .unwrap();
+    views.upsert(row("wal", 1)).await.unwrap();
+    release_tx.send(()).unwrap();
+    assert_eq!(read.await.unwrap().unwrap().len(), 1);
+    assert!(
+        released.load(Ordering::SeqCst),
+        "the writes waited for the read to give up"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn simultaneous_projection_writes_succeed() {
     let db = Database::new();

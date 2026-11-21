@@ -46,18 +46,61 @@ pub(crate) fn write_transaction<T, E>(
     database_error: impl Fn(String) -> E,
     body: impl FnOnce(&mut SqliteConnection) -> Result<T, E>,
 ) -> Result<T, E> {
-    AnsiTransactionManager::begin_transaction_sql(conn, "BEGIN IMMEDIATE")
+    let usual_timeout = spend_busy_timeout(conn, permit.queued_behind_refusals())
         .map_err(|e| database_error(e.to_string()))?;
-    let result = body(conn).and_then(|value| {
-        permit.exclude_readers();
-        AnsiTransactionManager::commit_transaction(conn)
-            .map(|()| value)
-            .map_err(|e| database_error(e.to_string()))
-    });
+    let result = AnsiTransactionManager::begin_transaction_sql(conn, "BEGIN IMMEDIATE")
+        .map_err(|e| database_error(e.to_string()))
+        .and_then(|()| body(conn))
+        .and_then(|value| {
+            permit.exclude_readers();
+            AnsiTransactionManager::commit_transaction(conn)
+                .map(|()| value)
+                .map_err(|e| database_error(e.to_string()))
+        });
     if result.is_err() {
         rollback_append(conn);
     }
+    if let Some(timeout) = usual_timeout {
+        // A connection that cannot get its timeout back must not be reused.
+        if set_busy_timeout(conn, timeout).is_err() {
+            *AnsiTransactionManager::transaction_manager_status_mut(conn) =
+                diesel::connection::TransactionManagerStatus::InError;
+        }
+    }
     result
+}
+
+/// A writer that queued behind attempts refused by a lock outside the gate
+/// has already waited `spent` for that lock. Take it off this connection's
+/// busy timeout for the writer's own attempt, which it still makes, so that
+/// queueing does not multiply the bounded wait. Returns the timeout to put
+/// back, if it was changed.
+fn spend_busy_timeout(
+    conn: &mut SqliteConnection,
+    spent: std::time::Duration,
+) -> diesel::QueryResult<Option<i32>> {
+    use diesel::prelude::*;
+    #[derive(QueryableByName)]
+    struct Timeout {
+        #[diesel(sql_type = diesel::sql_types::Integer)]
+        timeout: i32,
+    }
+    if spent.is_zero() {
+        return Ok(None);
+    }
+    let usual = diesel::sql_query("PRAGMA busy_timeout")
+        .get_result::<Timeout>(conn)?
+        .timeout;
+    if usual <= 0 {
+        return Ok(None);
+    }
+    let spent = i32::try_from(spent.as_millis()).unwrap_or(i32::MAX);
+    set_busy_timeout(conn, usual.saturating_sub(spent).max(0))?;
+    Ok(Some(usual))
+}
+
+fn set_busy_timeout(conn: &mut SqliteConnection, milliseconds: i32) -> diesel::QueryResult<()> {
+    conn.batch_execute(&format!("PRAGMA busy_timeout = {milliseconds}"))
 }
 
 #[cfg(test)]

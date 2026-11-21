@@ -16,29 +16,43 @@
 //!   (SQLite's `RESERVED` lock);
 //! - readers run together, also beside a writer that has not reached commit
 //!   (`SHARED`);
-//! - to commit, the writer stops admitting readers and waits for the running
-//!   ones to finish (`PENDING`, `EXCLUSIVE`); readers that arrive meanwhile
-//!   are all admitted when the commit ends, before the next one can begin.
+//! - to commit, the writer stops admitting readers and gives the running
+//!   ones a short grace to finish (`PENDING`, `EXCLUSIVE`); readers that
+//!   arrive meanwhile are all admitted when the commit ends, before the next
+//!   one can begin.
 //!
 //! So nobody is overtaken indefinitely: a writer waits for the writers that
-//! arrived before it, a commit for the reads already running, a read for at
-//! most one commit. Within the process the stores never meet inside SQLite's
-//! lock protocol at all. The gate is shared by everything in the process that
-//! uses the same file, whichever store, pool or spelling of the path it came
-//! from: it is found through the file name SQLite reports for the connection.
+//! arrived before it, a read for at most one commit. The gate is shared by
+//! everything in the process that uses the same file, whichever store, pool
+//! or spelling of the path it came from: it is found through the file name
+//! SQLite reports for the connection.
 //!
-//! Limits, by design:
+//! The gate only orders callers; it never replaces SQLite's locks, and where
+//! it cannot know what SQLite will do it steps aside:
 //!
+//! - The wait for running readers is bounded ([`DRAIN_GRACE`]). A reader may
+//!   itself be waiting inside SQLite for this writer, which takes the
+//!   exclusive lock early when its transaction outgrows the page cache; and
+//!   a long read is not worth queueing behind. After the grace the writer
+//!   commits and SQLite arbitrates, as it would without the gate.
+//! - In WAL mode readers and writers do not block each other, so readers are
+//!   not gated and commits do not wait for them; writers still take turns.
+//!   The journal mode is read once, by a store's first operation. A database
+//!   switched to WAL afterwards keeps its readers gated until the store is
+//!   reopened (slower, not wrong); SQLite does not let a database leave WAL
+//!   while other connections are open.
 //! - Only this crate's stores take part. Another process, or a connection
 //!   opened outside these stores, still competes through SQLite's busy
-//!   handler, so the busy timeout stays the bound for that contention.
+//!   handler, so the busy timeout stays the bound for that contention. Time a
+//!   writer spent queued behind attempts that such a lock refused is taken
+//!   off the busy timeout of its own attempt, which it always makes.
 //! - In-memory and temporary databases have no file name and are not gated.
 //! - A permit is taken on the blocking thread and released on it; it is never
 //!   held across an `await`. An operation nested inside another on the same
 //!   thread passes without queueing.
 use diesel::prelude::*;
 use diesel::r2d2::{ConnectionManager, Pool};
-use diesel::sql_types::{Integer, Nullable, Text};
+use diesel::sql_types::{Nullable, Text};
 use diesel::SqliteConnection;
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -52,6 +66,12 @@ use std::time::{Duration, Instant};
 
 /// SQLite's text for `SQLITE_BUSY`, as Diesel reports it.
 pub(crate) const LOCKED: &str = "database is locked";
+
+/// How long a commit waits for this process's running reads before it goes
+/// ahead and leaves the rest to SQLite. Store reads take well under this; a
+/// read still running after it is either long, or stuck behind this very
+/// writer inside SQLite.
+pub(crate) const DRAIN_GRACE: Duration = Duration::from_millis(20);
 
 struct Waiter {
     thread: Thread,
@@ -70,6 +90,20 @@ impl Waiter {
     fn wait(&self) {
         while !self.granted.load(Ordering::Acquire) {
             std::thread::park();
+        }
+    }
+
+    /// False if `grace` passed first.
+    fn wait_for(&self, grace: Duration) -> bool {
+        let deadline = Instant::now() + grace;
+        loop {
+            if self.granted.load(Ordering::Acquire) {
+                return true;
+            }
+            let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+                return false;
+            };
+            std::thread::park_timeout(left);
         }
     }
 
@@ -93,8 +127,35 @@ struct State {
     draining: Option<Arc<Waiter>>,
     /// Reads waiting for the commit to end.
     parked: Vec<Arc<Waiter>>,
-    /// Start and end of the latest write that SQLite refused as locked.
-    refused: Option<(Instant, Instant)>,
+    /// When the holder of the write slot got it.
+    attempt_since: Option<Instant>,
+    /// Total length of the attempts SQLite refused as locked. Attempts hold
+    /// the slot one at a time, so this is time, not overlapping intervals.
+    refused: Duration,
+}
+
+impl State {
+    /// What a writer arriving at `now` notes, to learn at its turn how long
+    /// it queued behind refused attempts (see [`State::queued_behind_refusals`]).
+    /// The part of the running attempt that is already over is not its wait.
+    fn refusals_before(&self, now: Instant) -> Duration {
+        let running = self
+            .attempt_since
+            .map(|since| now.saturating_duration_since(since));
+        self.refused + running.unwrap_or_default()
+    }
+
+    /// The time a writer that noted `before` on arrival has since spent
+    /// queued behind attempts refused as locked. Never more than it waited.
+    fn queued_behind_refusals(&self, before: Duration) -> Duration {
+        self.refused.saturating_sub(before)
+    }
+
+    fn record_refusal(&mut self, now: Instant) {
+        if let Some(since) = self.attempt_since {
+            self.refused += now.saturating_duration_since(since);
+        }
+    }
 }
 
 /// The queues described in the module documentation. `std::sync` locks
@@ -136,25 +197,27 @@ impl Gate {
         }
     }
 
-    /// Returns when the caller started queueing, if it had to.
-    fn begin_write(&self) -> Option<Instant> {
-        let queued = Instant::now();
-        let waiter = {
+    /// Returns how long the caller queued behind attempts refused as locked.
+    fn begin_write(&self) -> Duration {
+        let (waiter, before) = {
             let mut state = self.state();
+            let now = Instant::now();
             if !state.writer {
                 state.writer = true;
-                return None;
+                state.attempt_since = Some(now);
+                return Duration::ZERO;
             }
             let waiter = Waiter::new();
             state.writers.push_back(waiter.clone());
-            waiter
+            (waiter, state.refusals_before(now))
         };
         waiter.wait();
-        Some(queued)
+        self.state().queued_behind_refusals(before)
     }
 
-    /// For the holder of the write slot, before it commits.
-    fn exclude_readers(&self) {
+    /// For the holder of the write slot, before it commits: stop admitting
+    /// readers and give the running ones `grace` to finish.
+    fn exclude_readers(&self, grace: Duration) {
         let waiter = {
             let mut state = self.state();
             state.committing = true;
@@ -165,12 +228,15 @@ impl Gate {
             state.draining = Some(waiter.clone());
             waiter
         };
-        waiter.wait();
+        if !waiter.wait_for(grace) {
+            self.state().draining = None;
+        }
     }
 
     fn end_write(&self) {
         let mut state = self.state();
         state.committing = false;
+        state.draining = None;
         // Every read that waited out this commit runs before the next one.
         state.readers += state.parked.len();
         for reader in state.parked.drain(..) {
@@ -178,8 +244,14 @@ impl Gate {
         }
         // The slot passes on directly, in arrival order.
         match state.writers.pop_front() {
-            Some(next) => next.grant(),
-            None => state.writer = false,
+            Some(next) => {
+                state.attempt_since = Some(Instant::now());
+                next.grant();
+            }
+            None => {
+                state.writer = false;
+                state.attempt_since = None;
+            }
         }
     }
 }
@@ -211,7 +283,8 @@ thread_local! {
 
 struct Target {
     gate: Arc<Gate>,
-    busy_timeout: Duration,
+    /// False in WAL mode, where readers and writers do not block each other.
+    readers_gated: bool,
 }
 
 #[derive(QueryableByName)]
@@ -223,15 +296,16 @@ struct Attached {
 }
 
 #[derive(QueryableByName)]
-struct Timeout {
-    #[diesel(sql_type = Integer)]
-    timeout: i32,
+struct JournalMode {
+    #[diesel(sql_type = Text)]
+    journal_mode: String,
 }
 
-/// Ask the connection which file it uses. SQLite reports an absolute name
-/// with symbolic links resolved, whatever spelling, relative path or `file:`
-/// URI opened it, and an empty name for in-memory and temporary databases.
-/// `Err` means the question could not be asked; `Ok(None)` means no file.
+/// Ask the connection which file it uses and how. SQLite reports an absolute
+/// name with symbolic links resolved, whatever spelling, relative path or
+/// `file:` URI opened it, and an empty name for in-memory and temporary
+/// databases. `Err` means the question could not be asked; `Ok(None)` means
+/// no file.
 fn describe(conn: &mut SqliteConnection) -> QueryResult<Option<Target>> {
     let file = diesel::sql_query("PRAGMA database_list")
         .load::<Attached>(conn)?
@@ -242,34 +316,24 @@ fn describe(conn: &mut SqliteConnection) -> QueryResult<Option<Target>> {
     let Some(file) = file else {
         return Ok(None);
     };
-    let busy_timeout = diesel::sql_query("PRAGMA busy_timeout")
-        .get_result::<Timeout>(conn)?
-        .timeout;
+    let journal_mode = diesel::sql_query("PRAGMA journal_mode")
+        .get_result::<JournalMode>(conn)?
+        .journal_mode;
     let file = PathBuf::from(file);
     Ok(Some(Target {
         gate: gate_for(std::fs::canonicalize(&file).unwrap_or(file)),
-        busy_timeout: Duration::from_millis(busy_timeout.max(0) as u64),
+        readers_gated: !journal_mode.eq_ignore_ascii_case("wal"),
     }))
 }
 
 type ConnectionPool = Pool<ConnectionManager<SqliteConnection>>;
 
-/// A store's handle on the gate of its database file. The file is resolved
-/// once, by the store's first operation, and kept for the life of the store.
+/// A store's handle on the gate of its database file. The file and its
+/// journal mode are resolved once, by the store's first operation, and kept
+/// for the life of the store.
 #[derive(Default)]
 pub(crate) struct FileGate {
     target: OnceLock<Option<Target>>,
-}
-
-/// Returned instead of an attempt when another connection has kept the
-/// database locked for this writer's whole busy timeout while it queued.
-#[derive(Debug)]
-pub(crate) struct ExternallyLocked;
-
-impl Display for ExternallyLocked {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(LOCKED)
-    }
 }
 
 impl FileGate {
@@ -285,19 +349,20 @@ impl FileGate {
         if self.target.get().is_none() {
             self.resolve(conn);
         }
-        let gate = self.target.get().and_then(|target| target.as_ref());
-        let Some(gate) = gate.map(|target| &target.gate).filter(|gate| !inside(gate)) else {
+        let target = self.target.get().and_then(|target| target.as_ref());
+        let Some(target) = target.filter(|target| target.readers_gated && !inside(&target.gate))
+        else {
             return ReadPermit(None, PhantomData);
         };
-        gate.begin_read();
-        enter(gate);
-        ReadPermit(Some(gate.clone()), PhantomData)
+        target.gate.begin_read();
+        enter(&target.gate);
+        ReadPermit(Some(target.gate.clone()), PhantomData)
     }
 
     /// Queue for the write slot of the database file behind `pool`. Call it
     /// on the blocking thread before taking the connection the write will
     /// use, so a queued writer does not keep a pooled connection from others.
-    pub(crate) fn write(&self, pool: &ConnectionPool) -> Result<WritePermit, ExternallyLocked> {
+    pub(crate) fn write(&self, pool: &ConnectionPool) -> WritePermit {
         if self.target.get().is_none() {
             // If no connection can be had, the operation itself reports that.
             // The connection goes back to the pool before queueing.
@@ -309,10 +374,7 @@ impl FileGate {
     }
 
     /// As [`write`](Self::write), for a writer that owns its connection.
-    pub(crate) fn write_on(
-        &self,
-        conn: &mut SqliteConnection,
-    ) -> Result<WritePermit, ExternallyLocked> {
+    pub(crate) fn write_on(&self, conn: &mut SqliteConnection) -> WritePermit {
         if self.target.get().is_none() {
             self.resolve(conn);
         }
@@ -327,34 +389,23 @@ impl FileGate {
         }
     }
 
-    fn admit_writer(&self) -> Result<WritePermit, ExternallyLocked> {
+    fn admit_writer(&self) -> WritePermit {
         let Some(Some(target)) = self.target.get() else {
-            return Ok(WritePermit::ungated());
+            return WritePermit::ungated();
         };
         if inside(&target.gate) {
-            return Ok(WritePermit::ungated());
+            return WritePermit::ungated();
         }
-        if let Some(queued) = target.gate.begin_write() {
-            // Queueing must not multiply the bounded wait for a lock held
-            // outside this process. If a writer ahead spent its whole busy
-            // timeout on such a lock while this one queued behind it, this
-            // one has waited out the same lock for as long and reports it,
-            // instead of starting a second full timeout of its own.
-            let refused = target.gate.state().refused;
-            if let Some((start, end)) = refused {
-                let waited = end.saturating_duration_since(start.max(queued));
-                let bound = target.busy_timeout - target.busy_timeout / 10;
-                if end > queued && waited >= bound {
-                    target.gate.end_write();
-                    return Err(ExternallyLocked);
-                }
-            }
-        }
+        let queued_behind_refusals = target.gate.begin_write();
         enter(&target.gate);
-        Ok(WritePermit {
-            held: Some((target.gate.clone(), Instant::now())),
+        WritePermit {
+            held: Some(Held {
+                gate: target.gate.clone(),
+                readers_gated: target.readers_gated,
+                queued_behind_refusals,
+            }),
             _on_this_thread: PhantomData,
-        })
+        }
     }
 }
 
@@ -387,10 +438,16 @@ impl Drop for ReadPermit {
     }
 }
 
+struct Held {
+    gate: Arc<Gate>,
+    readers_gated: bool,
+    queued_behind_refusals: Duration,
+}
+
 /// The write slot. Dropping it, on any path including a panic, passes the
 /// slot on; it cannot leave the thread that obtained it.
 pub(crate) struct WritePermit {
-    held: Option<(Arc<Gate>, Instant)>,
+    held: Option<Held>,
     _on_this_thread: PhantomData<*const ()>,
 }
 
@@ -402,35 +459,42 @@ impl WritePermit {
         }
     }
 
-    /// Call before `COMMIT`, or before a statement that commits by itself:
-    /// stop admitting this process's readers and wait for the running ones,
-    /// so the commit does not wait for them inside SQLite and they do not
-    /// poll for the file against it.
+    /// How long this writer queued behind attempts that a lock outside the
+    /// gate refused. It has waited out that lock for as long already, so its
+    /// own attempt should not wait a whole busy timeout again: queueing must
+    /// not multiply the bounded wait.
+    pub(crate) fn queued_behind_refusals(&self) -> Duration {
+        self.held
+            .as_ref()
+            .map_or(Duration::ZERO, |held| held.queued_behind_refusals)
+    }
+
+    /// Call before `COMMIT`: stop admitting this process's readers and give
+    /// the running ones a short grace, so that normally the commit does not
+    /// wait for them inside SQLite and they do not poll for the file against
+    /// it. Nothing to do in WAL mode.
     pub(crate) fn exclude_readers(&self) {
-        if let Some((gate, _)) = &self.held {
-            gate.exclude_readers();
+        if let Some(held) = self.held.as_ref().filter(|held| held.readers_gated) {
+            held.gate.exclude_readers(DRAIN_GRACE);
         }
     }
 
     /// Release after the write has committed or rolled back, recording
-    /// whether SQLite refused it as locked (see `FileGate::admit_writer`).
+    /// whether SQLite refused it as locked.
     pub(crate) fn finish<T, E: Display>(self, outcome: &Result<T, E>) {
-        if let Some((gate, since)) = &self.held {
-            let refused = match outcome {
-                Ok(_) => None,
-                Err(error) if error.to_string().contains(LOCKED) => Some((*since, Instant::now())),
-                Err(_) => return,
-            };
-            gate.state().refused = refused;
+        if let (Some(held), Err(error)) = (&self.held, outcome) {
+            if error.to_string().contains(LOCKED) {
+                held.gate.state().record_refusal(Instant::now());
+            }
         }
     }
 }
 
 impl Drop for WritePermit {
     fn drop(&mut self) {
-        if let Some((gate, _)) = self.held.take() {
-            leave(&gate);
-            gate.end_write();
+        if let Some(held) = self.held.take() {
+            leave(&held.gate);
+            held.gate.end_write();
         }
     }
 }
@@ -441,6 +505,9 @@ mod tests {
     use diesel::connection::SimpleConnection;
     use std::sync::mpsc;
 
+    /// Far longer than any step of these tests: a wait this long is a failure.
+    const NEVER: Duration = Duration::from_secs(30);
+
     struct Dir(PathBuf);
     impl Dir {
         fn new() -> Self {
@@ -449,7 +516,7 @@ mod tests {
             Self(dir)
         }
         fn pool(&self) -> ConnectionPool {
-            pool(self.0.join("store.db").to_str().unwrap(), 200)
+            pool(self.0.join("store.db").to_str().unwrap())
         }
     }
     impl Drop for Dir {
@@ -458,18 +525,9 @@ mod tests {
         }
     }
 
-    fn pool(url: &str, busy_timeout_ms: u32) -> ConnectionPool {
-        #[derive(Debug)]
-        struct Busy(u32);
-        impl diesel::r2d2::CustomizeConnection<SqliteConnection, diesel::r2d2::Error> for Busy {
-            fn on_acquire(&self, conn: &mut SqliteConnection) -> Result<(), diesel::r2d2::Error> {
-                conn.batch_execute(&format!("PRAGMA busy_timeout = {}", self.0))
-                    .map_err(diesel::r2d2::Error::QueryError)
-            }
-        }
+    fn pool(url: &str) -> ConnectionPool {
         Pool::builder()
             .max_size(2)
-            .connection_customizer(Box::new(Busy(busy_timeout_ms)))
             .build(ConnectionManager::new(url))
             .unwrap()
     }
@@ -488,13 +546,13 @@ mod tests {
     #[test]
     fn the_write_slot_is_granted_in_arrival_order() {
         let gate = Arc::new(Gate::default());
-        assert!(gate.begin_write().is_none());
+        gate.begin_write();
         let (order_tx, order_rx) = mpsc::channel();
         let mut threads = Vec::new();
         for n in 0..16 {
             let (waiting, order_tx) = (gate.clone(), order_tx.clone());
             threads.push(std::thread::spawn(move || {
-                assert!(waiting.begin_write().is_some());
+                waiting.begin_write();
                 order_tx.send(n).unwrap();
                 waiting.end_write();
             }));
@@ -509,7 +567,8 @@ mod tests {
             order_rx.try_iter().collect::<Vec<_>>(),
             (0..16).collect::<Vec<_>>()
         );
-        assert!(!gate.state().writer);
+        let state = gate.state();
+        assert!(!state.writer && state.attempt_since.is_none());
     }
 
     #[test]
@@ -517,7 +576,7 @@ mod tests {
         let gate = Arc::new(Gate::default());
         // Reads run together, and beside a writer that has not reached commit.
         gate.begin_read();
-        assert!(gate.begin_write().is_none());
+        gate.begin_write();
         gate.begin_read();
         assert_eq!(gate.state().readers, 2);
 
@@ -525,21 +584,25 @@ mod tests {
         let committing = gate.clone();
         let (committed_tx, committed_rx) = mpsc::channel();
         let writer = std::thread::spawn(move || {
-            committing.exclude_readers();
+            committing.exclude_readers(NEVER);
             committed_tx.send(committing.state().readers).unwrap();
         });
         until(&gate, |state| state.draining.is_some());
 
-        // Reads arriving now wait for the commit to end, however many.
+        // Reads arriving now wait for the commit to end, however many. Each
+        // reports when it runs and keeps running until told to finish.
+        let (running_tx, running_rx) = mpsc::channel();
+        let (finish_tx, finish_rx) = mpsc::channel::<()>();
+        let finish_rx = Arc::new(Mutex::new(finish_rx));
         let late: Vec<_> = (0..3)
             .map(|_| {
-                let reading = gate.clone();
+                let (reading, running_tx, finish_rx) =
+                    (gate.clone(), running_tx.clone(), finish_rx.clone());
                 std::thread::spawn(move || {
                     reading.begin_read();
-                    let admitted_with = reading.state().readers;
-                    std::thread::sleep(Duration::from_millis(50));
+                    running_tx.send(()).unwrap();
+                    finish_rx.lock().unwrap().recv_timeout(NEVER).unwrap();
                     reading.end_read();
-                    admitted_with
                 })
             })
             .collect();
@@ -547,35 +610,133 @@ mod tests {
         gate.end_read();
         assert!(committed_rx.try_recv().is_err(), "one read still runs");
         gate.end_read();
-        assert_eq!(
-            committed_rx.recv().unwrap(),
-            0,
-            "commit began with no reads"
-        );
+        assert_eq!(committed_rx.recv_timeout(NEVER).unwrap(), 0);
         writer.join().unwrap();
-        assert_eq!(gate.state().readers, 0, "late reads still wait");
+        assert!(running_rx.try_recv().is_err(), "late reads still wait");
 
         // A second writer is queued for the slot. When the first ends, all
-        // waiting reads start at once, and the second writer's commit then
+        // waiting reads run at once, and the second writer's commit then
         // waits for them: no read waits out more than one commit.
         let second = gate.clone();
         let (second_tx, second_rx) = mpsc::channel();
         let second_writer = std::thread::spawn(move || {
-            assert!(second.begin_write().is_some());
-            second.exclude_readers();
+            second.begin_write();
+            second.exclude_readers(NEVER);
             second_tx.send(second.state().readers).unwrap();
             second.end_write();
         });
         until(&gate, |state| state.writers.len() == 1);
         gate.end_write();
-        for reader in late {
-            assert_eq!(reader.join().unwrap(), 3, "admitted together");
+        for _ in 0..3 {
+            running_rx.recv_timeout(NEVER).unwrap();
         }
-        assert_eq!(second_rx.recv().unwrap(), 0);
-        second_writer.join().unwrap();
+        assert_eq!(gate.state().readers, 3, "all three run together");
+        until(&gate, |state| state.draining.is_some());
+        assert!(second_rx.try_recv().is_err(), "the commit waits for them");
+        for _ in 0..3 {
+            finish_tx.send(()).unwrap();
+        }
+        assert_eq!(second_rx.recv_timeout(NEVER).unwrap(), 0);
+        for thread in late.into_iter().chain([second_writer]) {
+            thread.join().unwrap();
+        }
         let state = gate.state();
         assert!(!state.writer && !state.committing && state.readers == 0);
         assert!(state.writers.is_empty() && state.parked.is_empty());
+    }
+
+    #[test]
+    fn a_commit_stops_waiting_for_a_read_that_does_not_finish() {
+        let gate = Gate::default();
+        gate.begin_write();
+        // This read never ends on its own: it stands for one that is stuck
+        // inside SQLite behind this writer, or is simply long.
+        gate.begin_read();
+        let grace = Duration::from_millis(30);
+        let began = Instant::now();
+        gate.exclude_readers(grace);
+        assert!(began.elapsed() >= grace);
+        {
+            let state = gate.state();
+            assert!(state.committing && state.draining.is_none() && state.readers == 1);
+        }
+        // The read ends later without anyone to wake, and the gate is clean.
+        gate.end_write();
+        gate.end_read();
+        let state = gate.state();
+        assert!(!state.writer && !state.committing && state.readers == 0);
+    }
+
+    #[test]
+    fn a_writer_is_charged_only_the_refused_time_it_queued_through() {
+        // The arithmetic alone, on chosen instants.
+        let start = Instant::now();
+        let at = |milliseconds| start + Duration::from_millis(milliseconds);
+        let mut state = State {
+            writer: true,
+            attempt_since: Some(at(0)),
+            ..State::default()
+        };
+        // Two writers arrive during an attempt that is then refused at 300.
+        let early = state.refusals_before(at(10));
+        let late = state.refusals_before(at(280));
+        state.record_refusal(at(300));
+        assert_eq!(
+            state.queued_behind_refusals(early),
+            Duration::from_millis(290)
+        );
+        assert_eq!(
+            state.queued_behind_refusals(late),
+            Duration::from_millis(20)
+        );
+
+        // The next attempt succeeds: nobody is charged for queueing behind it.
+        state.attempt_since = Some(at(300));
+        let behind_success = state.refusals_before(at(350));
+        state.attempt_since = Some(at(900));
+        assert_eq!(state.queued_behind_refusals(behind_success), Duration::ZERO);
+        // Not even when a later attempt is refused for less than that wait.
+        state.record_refusal(at(940));
+        assert_eq!(state.queued_behind_refusals(behind_success), Duration::ZERO);
+        // Refusals add up for a writer that queued through several.
+        assert_eq!(
+            state.queued_behind_refusals(early),
+            Duration::from_millis(330)
+        );
+    }
+
+    #[test]
+    fn a_refused_attempt_is_charged_to_the_writers_queued_behind_it() {
+        let dir = Dir::new();
+        let pool = dir.pool();
+        let file_gate = FileGate::new();
+        let holder = file_gate.write(&pool);
+        assert_eq!(holder.queued_behind_refusals(), Duration::ZERO);
+        let gate = gate_of(&file_gate);
+        let queue = || {
+            let (file_gate, pool) = (file_gate.clone(), pool.clone());
+            let queued = gate.state().writers.len();
+            let writer = std::thread::spawn(move || {
+                let permit = file_gate.write(&pool);
+                let charged = permit.queued_behind_refusals();
+                permit.finish(&Ok::<(), &str>(()));
+                charged
+            });
+            until(&gate, |state| state.writers.len() > queued);
+            writer
+        };
+        let first = queue();
+        std::thread::sleep(Duration::from_millis(20));
+        holder.finish(&Err::<(), _>(LOCKED));
+        let charged = first.join().unwrap();
+        assert!(charged >= Duration::from_millis(20), "{charged:?}");
+
+        // Other errors and successes charge nobody.
+        let holder = file_gate.write(&pool);
+        let second = queue();
+        std::thread::sleep(Duration::from_millis(20));
+        holder.finish(&Err::<(), _>("constraint failed"));
+        assert_eq!(second.join().unwrap(), Duration::ZERO);
     }
 
     #[test]
@@ -602,7 +763,7 @@ mod tests {
         .iter()
         .map(|url| {
             let gate = FileGate::new();
-            drop(gate.write(&pool(url, 100)).unwrap());
+            drop(gate.write(&pool(url)));
             gate
         })
         .collect();
@@ -612,15 +773,11 @@ mod tests {
 
         // A store that only ever reads finds the same gate.
         let reader = FileGate::new();
-        drop(reader.read(&mut pool(&plain, 100).get().unwrap()));
+        drop(reader.read(&mut pool(&plain).get().unwrap()));
         assert!(Arc::ptr_eq(&gate_of(&reader), &gate_of(&gates[0])));
 
         let other = FileGate::new();
-        drop(
-            other
-                .write(&pool(dir.0.join("other.db").to_str().unwrap(), 100))
-                .unwrap(),
-        );
+        drop(other.write(&pool(dir.0.join("other.db").to_str().unwrap())));
         assert!(!Arc::ptr_eq(&gate_of(&other), &gate_of(&gates[0])));
     }
 
@@ -628,11 +785,43 @@ mod tests {
     fn databases_without_a_file_are_not_gated() {
         for url in [":memory:", "", "file::memory:?cache=shared"] {
             let gate = FileGate::new();
-            let pool = pool(url, 100);
-            assert!(gate.write(&pool).unwrap().held.is_none(), "{url}");
+            let pool = pool(url);
+            assert!(gate.write(&pool).held.is_none(), "{url}");
             assert!(gate.read(&mut pool.get().unwrap()).0.is_none(), "{url}");
             assert!(gate.target.get().unwrap().is_none(), "{url}");
         }
+    }
+
+    #[test]
+    fn wal_readers_are_not_gated_and_commits_do_not_wait_for_them() {
+        let dir = Dir::new();
+        let pool = dir.pool();
+        pool.get()
+            .unwrap()
+            .batch_execute("PRAGMA journal_mode = WAL")
+            .unwrap();
+        let file_gate = FileGate::new();
+        let reading = file_gate.read(&mut pool.get().unwrap());
+        assert!(reading.0.is_none());
+        // Writers still take turns.
+        let writing = file_gate.write(&pool);
+        let gate = gate_of(&file_gate);
+        assert!(gate.state().writer);
+        writing.exclude_readers();
+        assert!(!gate.state().committing);
+        drop(writing);
+        assert!(!gate.state().writer);
+
+        // The same file in rollback-journal mode, for contrast.
+        let dir = Dir::new();
+        let pool = dir.pool();
+        let file_gate = FileGate::new();
+        let reading = file_gate.read(&mut pool.get().unwrap());
+        assert!(reading.0.is_some());
+        drop(reading);
+        let writing = file_gate.write(&pool);
+        writing.exclude_readers();
+        assert!(gate_of(&file_gate).state().committing);
     }
 
     #[test]
@@ -641,8 +830,8 @@ mod tests {
         let pool = dir.pool();
         let (outer_gate, inner_gate) = (FileGate::new(), FileGate::new());
 
-        let outer = outer_gate.write(&pool).unwrap();
-        let inner = inner_gate.write(&pool).unwrap();
+        let outer = outer_gate.write(&pool);
+        let inner = inner_gate.write(&pool);
         assert!(outer.held.is_some() && inner.held.is_none());
         inner.exclude_readers();
         let reading = inner_gate.read(&mut pool.get().unwrap());
@@ -655,7 +844,7 @@ mod tests {
 
         // A write nested in a read cannot wait for its own thread either.
         let outer = outer_gate.read(&mut pool.get().unwrap());
-        let inner = inner_gate.write(&pool).unwrap();
+        let inner = inner_gate.write(&pool);
         assert!(outer.0.is_some() && inner.held.is_none());
         inner.exclude_readers();
         drop((inner, outer));
@@ -672,7 +861,7 @@ mod tests {
             let (panicking_gate, panicking_pool) = (gate.clone(), pool.clone());
             let panicked = std::thread::spawn(move || {
                 let _writing = write.then(|| {
-                    let permit = panicking_gate.write(&panicking_pool).unwrap();
+                    let permit = panicking_gate.write(&panicking_pool);
                     permit.exclude_readers();
                     permit
                 });
@@ -686,45 +875,6 @@ mod tests {
             let state = state.state();
             assert!(!state.writer && !state.committing && state.readers == 0);
         }
-        assert!(gate.write(&pool).unwrap().held.is_some());
-    }
-
-    #[test]
-    fn a_writer_queued_through_a_whole_refused_attempt_reports_the_lock() {
-        let dir = Dir::new();
-        let pool = dir.pool();
-        let file_gate = FileGate::new();
-        drop(file_gate.write(&pool).unwrap());
-        let gate = gate_of(&file_gate);
-        let queue = |file_gate: &Arc<FileGate>| {
-            let (file_gate, pool) = (file_gate.clone(), pool.clone());
-            let queued = std::thread::spawn(move || file_gate.write(&pool).map(drop));
-            until(&gate, |state| !state.writers.is_empty());
-            queued
-        };
-
-        // Queued for the holder's whole refused attempt: same lock, same wait.
-        let holder = file_gate.write(&pool).unwrap();
-        let queued = queue(&file_gate);
-        std::thread::sleep(Duration::from_millis(200));
-        holder.finish(&Err::<(), _>(LOCKED));
-        assert!(queued.join().unwrap().is_err());
-        assert!(!gate.state().writer);
-
-        // Arrived late in a refused attempt: it gets its own full attempt.
-        let holder = file_gate.write(&pool).unwrap();
-        std::thread::sleep(Duration::from_millis(200));
-        let late = queue(&file_gate);
-        holder.finish(&Err::<(), _>(LOCKED));
-        assert!(late.join().unwrap().is_ok());
-
-        // A later success clears the record; other errors do not set it.
-        file_gate.write(&pool).unwrap().finish(&Ok::<(), &str>(()));
-        assert!(gate.state().refused.is_none());
-        file_gate
-            .write(&pool)
-            .unwrap()
-            .finish(&Err::<(), _>("constraint failed"));
-        assert!(gate.state().refused.is_none());
+        assert!(gate.write(&pool).held.is_some());
     }
 }
