@@ -23,12 +23,12 @@ postgres = ["arc-stack/postgres"]
 test-utils = []
 
 [dependencies]
-arc-auth-core = { path = "../arc-auth-core", version = "0.9.2" }
+arc-auth-core = { path = "../arc-auth-core", version = "0.9.3" }
 # Workspace crates
-arc-core = { path = "../arc-core", version = "0.9.2" }
-arc-stack = { path = "../arc-stack", version = "0.9.2", default-features = false, features = ["sqlite"] }
-arc-es-sqlite = { path = "../arc-es-sqlite", version = "0.9.2" }
-arc-es-nats = { path = "../arc-es-nats", version = "0.9.2", optional = true }
+arc-core = { path = "../arc-core", version = "0.9.3" }
+arc-stack = { path = "../arc-stack", version = "0.9.3", default-features = false, features = ["sqlite"] }
+arc-es-sqlite = { path = "../arc-es-sqlite", version = "0.9.3" }
+arc-es-nats = { path = "../arc-es-nats", version = "0.9.3", optional = true }
 
 # Web framework
 actix-web.workspace = true
@@ -76,8 +76,8 @@ chrono.workspace = true
 uuid.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
-sqlx = { version = "0.8.6", default-features = false, features = ["sqlite", "runtime-tokio-rustls"] }
+libsqlite3-sys.workspace = true
 
 [dev-dependencies]
-arc-core = { path = "../arc-core", version = "0.9.2", features = ["test-utils"] }
+arc-core = { path = "../arc-core", version = "0.9.3", features = ["test-utils"] }
 serial_test.workspace = true

@@ -1,7 +1,7 @@
 # Arc Project Progress
 
 **Last updated:** 2026-11-06
-**Current development version:** 0.9.2
+**Current development version:** 0.9.3
 **Latest published version:** 0.9.2
 **Status:** All fourteen 0.9.2 packages are published to crates.io (2026-11-19) with the
 `arc-es-postgres` write guard and patched Actix dependencies, on top of the 0.9.1 security,
@@ -29,6 +29,25 @@ observability, and developer experience.
 
 This is the canonical project-status and roadmap tracker. Current source code and accepted ADRs
 take precedence when a claim here becomes stale.
+
+## Patched SQLite dependency — 0.9.3, not yet published — 2026-11-19
+
+- `arc-es-postgres` depends on `sqlx-core` and `sqlx-postgres` 0.8 instead of the `sqlx`
+  facade, whose optional MySQL and SQLite drivers stayed in `Cargo.lock`. Arc's lockfile now
+  resolves `libsqlite3-sys` 0.40 through Diesel, and the `cargo audit` exceptions for
+  RUSTSEC-2026-0459 and RUSTSEC-2023-0071 are removed. Public types are unchanged (the
+  facade re-exports the same types); verified with an external consumer on the `sqlx` 0.8
+  facade, the workspace tests and the live PostgreSQL 16 tests, which do not run in CI.
+- The `arc new --android` template is ported from the `sqlx` SQLite driver to Diesel
+  (2026-11-20): generated `rust/src/schema.rs`, the resource test template and the
+  two-resource host test use Diesel, and the generated manifest requests `libsqlite3-sys`
+  `bundled` directly. `schema::initialize` keeps its signature; its blocking work runs on
+  Tokio's blocking pool or, without a Tokio runtime, on a plain thread, and panics propagate. A project generated against this checkout resolves `libsqlite3-sys`
+  0.40 and no `sqlx` crate, passes its host tests and `cargo audit --deny warnings`. Not
+  run locally: the Android cross-build and emulator checks (`scripts/check-android-scaffold.sh`),
+  which the Android Scaffold workflow runs. No other `arc new` template uses `sqlx`.
+- Open: Android projects generated before 0.9.3 keep the `sqlx` driver until moved by hand
+  (steps in the changelog); `arc` has no command that rewrites an existing skeleton file.
 
 ## PostgreSQL write guard — 0.9.2 — 2026-11-19
 

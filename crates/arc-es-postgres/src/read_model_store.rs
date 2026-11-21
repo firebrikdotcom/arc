@@ -30,6 +30,7 @@
 //! names are bound as the `->>` operand and so are parameterized, but are still
 //! validated for parity with the SQLite store.
 
+use crate::sqlx;
 use arc_core::read_model_store::{
     CollectionOrder, CollectionPage, CollectionQuery, ReadModelError, ReadModelResult,
     ReadModelStore, Row, Upsert,

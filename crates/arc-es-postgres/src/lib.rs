@@ -17,6 +17,7 @@ use uuid::Uuid;
 pub use arc_core::{Deserialize, Serialize};
 
 pub mod read_model_store;
+mod sqlx;
 pub use read_model_store::PostgresReadModelStore;
 
 /// DDL for the append-only event log. Idempotent.
@@ -275,6 +276,9 @@ impl EventRow {
 #[async_trait]
 pub trait WriteGuard: Send + Sync + 'static {
     /// Decide whether the write transaction on `conn` may proceed.
+    ///
+    /// `conn` is the type the `sqlx` 0.8 facade re-exports as `sqlx::PgConnection`,
+    /// so implementations may keep spelling it that way.
     async fn check(&self, conn: &mut sqlx::PgConnection) -> EventStoreResult<()>;
 }
 
@@ -480,7 +484,8 @@ impl PostgresEventStore {
     }
 
     /// Build a store from an existing pool. Lets tests share one pool with the
-    /// read-model store against the same database.
+    /// read-model store against the same database. The pool is the type the `sqlx`
+    /// 0.8 facade re-exports as `sqlx::PgPool`.
     pub fn with_pool(pool: PgPool) -> Self {
         PostgresEventStore {
             pool,

@@ -89,24 +89,28 @@ fn generated_two_resource_project_passes_host_tests() {
     // generated migrations and ledger rather than a mock schema.
     fs::write(app.join("rust/tests/two_resources.rs"), r#"
 use sample_core::{ffi::NativeCore, schema};
-use sqlx::{Connection, Executor};
+use diesel::{connection::SimpleConnection as _, Connection as _, RunQueryDsl as _, SqliteConnection};
+fn retained(path: &str) -> String {
+    let mut db = SqliteConnection::establish(path).unwrap();
+    diesel::dsl::sql::<diesel::sql_types::Text>("SELECT value FROM retained_data").get_result(&mut db).unwrap()
+}
 #[tokio::test]
 async fn existing_database_gains_second_resource_without_losing_data() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("app.sqlite").to_string_lossy().into_owned();
-    let opts = sqlx::sqlite::SqliteConnectOptions::new().filename(&path).create_if_missing(true);
-    let mut db = sqlx::SqliteConnection::connect_with(&opts).await.unwrap();
-    db.execute("CREATE TABLE arc_schema_migrations (version TEXT PRIMARY KEY)").await.unwrap();
+    let mut db = SqliteConnection::establish(&path).unwrap();
+    db.batch_execute("CREATE TABLE arc_schema_migrations (version TEXT PRIMARY KEY)").unwrap();
     let mut migrations: Vec<_> = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/migrations")).unwrap().map(|e| e.unwrap().path()).collect();
     migrations.sort();
     for migration in migrations.iter().filter(|p| !p.file_name().unwrap().to_string_lossy().contains("tag")) {
         let sql = std::fs::read_to_string(migration.join("up.sql")).unwrap();
-        db.execute(sql.as_str()).await.unwrap();
-        sqlx::query("INSERT INTO arc_schema_migrations(version) VALUES (?)").bind(migration.file_name().unwrap().to_str().unwrap()).execute(&mut db).await.unwrap();
+        db.batch_execute(sql.as_str()).unwrap();
+        diesel::sql_query("INSERT INTO arc_schema_migrations(version) VALUES (?)")
+            .bind::<diesel::sql_types::Text, _>(migration.file_name().unwrap().to_str().unwrap()).execute(&mut db).unwrap();
     }
-    db.execute("CREATE TABLE retained_data (value TEXT NOT NULL)").await.unwrap();
-    db.execute("INSERT INTO retained_data VALUES ('preserved')").await.unwrap();
-    db.close().await.unwrap();
+    db.batch_execute("CREATE TABLE retained_data (value TEXT NOT NULL)").unwrap();
+    db.batch_execute("INSERT INTO retained_data VALUES ('preserved')").unwrap();
+    drop(db);
     let core = NativeCore::open(path.clone()).await.unwrap();
     let note = core.create_note("note".into()).await.unwrap();
     let tag = core.create_tag("tag".into()).await.unwrap();
@@ -114,27 +118,46 @@ async fn existing_database_gains_second_resource_without_losing_data() {
     schema::initialize(&path).await.unwrap();
     assert_eq!(core.get_note(note).await.unwrap().name, "note");
     assert_eq!(core.get_tag(tag).await.unwrap().name, "tag");
-    let mut db = sqlx::SqliteConnection::connect_with(&opts).await.unwrap();
-    let retained: String = sqlx::query_scalar("SELECT value FROM retained_data").fetch_one(&mut db).await.unwrap();
-    assert_eq!(retained, "preserved");
-    db.close().await.unwrap();
+    assert_eq!(retained(&path), "preserved");
+}
+// The initializer must also complete on an executor that is not a Tokio runtime.
+#[test]
+fn schema_initializes_without_a_tokio_runtime() {
+    use std::{future::Future, sync::Arc, task::{Context, Poll, Wake, Waker}};
+    struct Unpark(std::thread::Thread);
+    impl Wake for Unpark {
+        fn wake(self: Arc<Self>) { self.0.unpark(); }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("plain.sqlite").to_string_lossy().into_owned();
+    let waker = Waker::from(Arc::new(Unpark(std::thread::current())));
+    let mut context = Context::from_waker(&waker);
+    for _ in 0..2 {
+        let mut future = std::pin::pin!(schema::initialize(&path));
+        let result = loop {
+            match future.as_mut().poll(&mut context) {
+                Poll::Ready(result) => break result,
+                Poll::Pending => std::thread::park(),
+            }
+        };
+        result.unwrap();
+    }
+    let mut db = SqliteConnection::establish(&path).unwrap();
+    let applied: i64 = diesel::dsl::sql::<diesel::sql_types::BigInt>("SELECT COUNT(*) FROM arc_schema_migrations").get_result(&mut db).unwrap();
+    assert!(applied >= 1);
 }
 #[tokio::test]
 async fn failed_migration_preserves_existing_data() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("failure.sqlite").to_string_lossy().into_owned();
     schema::initialize(&path).await.unwrap();
-    let opts = sqlx::sqlite::SqliteConnectOptions::new().filename(&path);
-    let mut db = sqlx::SqliteConnection::connect_with(&opts).await.unwrap();
-    db.execute("CREATE TABLE retained_data (value TEXT NOT NULL)").await.unwrap();
-    db.execute("INSERT INTO retained_data VALUES ('preserved')").await.unwrap();
-    db.execute("DELETE FROM arc_schema_migrations WHERE version LIKE '%tags_view'").await.unwrap();
-    db.close().await.unwrap();
+    let mut db = SqliteConnection::establish(&path).unwrap();
+    db.batch_execute("CREATE TABLE retained_data (value TEXT NOT NULL)").unwrap();
+    db.batch_execute("INSERT INTO retained_data VALUES ('preserved')").unwrap();
+    db.batch_execute("DELETE FROM arc_schema_migrations WHERE version LIKE '%tags_view'").unwrap();
+    drop(db);
     assert!(schema::initialize(&path).await.is_err());
-    let mut db = sqlx::SqliteConnection::connect_with(&opts).await.unwrap();
-    let retained: String = sqlx::query_scalar("SELECT value FROM retained_data").fetch_one(&mut db).await.unwrap();
-    assert_eq!(retained, "preserved");
-    db.close().await.unwrap();
+    assert_eq!(retained(&path), "preserved");
 }
 "#).unwrap();
     let target = std::env::var_os("ARC_ANDROID_HOST_TARGET")

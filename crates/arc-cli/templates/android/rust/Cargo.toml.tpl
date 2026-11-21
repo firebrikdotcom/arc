@@ -16,7 +16,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
-sqlx = { version = "0.8.6", default-features = false, features = ["sqlite", "runtime-tokio-rustls"] }
+diesel = { version = "2.2.6", features = ["sqlite"] }
+# Android has no system SQLite to link: compile it from the bundled source.
+libsqlite3-sys = { version = ">=0.30.1, <0.41.0", features = ["bundled"] }
+tokio = { version = "1", features = ["rt", "sync"] }
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tempfile = "3"
