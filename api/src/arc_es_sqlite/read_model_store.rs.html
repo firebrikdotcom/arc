@@ -58,7 +58,7 @@
 <a href=#58 id=58 data-nosnippet>58</a>    <span class="doccomment">/// Build a new store from a database URL. Creates a small r2d2 pool.
 <a href=#59 id=59 data-nosnippet>59</a>    </span><span class="kw">pub async fn </span>new(database_url: <span class="kw-2">&amp;</span>str) -&gt; ReadModelResult&lt;<span class="self">Self</span>&gt; {
 <a href=#60 id=60 data-nosnippet>60</a>        <span class="kw">let </span>manager = ConnectionManager::&lt;SqliteConnection&gt;::new(database_url);
-<a href=#61 id=61 data-nosnippet>61</a>        <span class="kw">let </span>pool = Pool::builder()
+<a href=#61 id=61 data-nosnippet>61</a>        <span class="kw">let </span>pool = <span class="kw">crate</span>::connection::pool_builder()
 <a href=#62 id=62 data-nosnippet>62</a>            .max_size(<span class="number">10</span>)
 <a href=#63 id=63 data-nosnippet>63</a>            .connection_customizer(Box::new(<span class="kw">crate</span>::connection::BusyTimeout))
 <a href=#64 id=64 data-nosnippet>64</a>            .build(manager)
@@ -710,8 +710,9 @@
 <a href=#710 id=710 data-nosnippet>710</a>            .<span class="kw">await
 <a href=#711 id=711 data-nosnippet>711</a>            </span>.unwrap();
 <a href=#712 id=712 data-nosnippet>712</a>        <span class="kw">crate</span>::connection::assert_timeout_on_replacement(<span class="kw-2">&amp;</span>store.pool);
-<a href=#713 id=713 data-nosnippet>713</a>        drop(store);
-<a href=#714 id=714 data-nosnippet>714</a>        std::fs::remove_file(path).unwrap();
-<a href=#715 id=715 data-nosnippet>715</a>    }
-<a href=#716 id=716 data-nosnippet>716</a>}
+<a href=#713 id=713 data-nosnippet>713</a>        <span class="macro">assert!</span>(!store.pool.test_on_check_out());
+<a href=#714 id=714 data-nosnippet>714</a>        drop(store);
+<a href=#715 id=715 data-nosnippet>715</a>        std::fs::remove_file(path).unwrap();
+<a href=#716 id=716 data-nosnippet>716</a>    }
+<a href=#717 id=717 data-nosnippet>717</a>}
 </code></pre></div></section></main></body></html>

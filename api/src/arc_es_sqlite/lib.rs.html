@@ -386,7 +386,7 @@
 <a href=#386 id=386 data-nosnippet>386</a>
 <a href=#387 id=387 data-nosnippet>387</a>    <span class="kw">pub async fn </span>new(database_url: <span class="kw-2">&amp;</span>str) -&gt; EventStoreResult&lt;<span class="self">Self</span>&gt; {
 <a href=#388 id=388 data-nosnippet>388</a>        <span class="kw">let </span>manager = ConnectionManager::&lt;SqliteConnection&gt;::new(database_url);
-<a href=#389 id=389 data-nosnippet>389</a>        <span class="kw">let </span>pool = Pool::builder()
+<a href=#389 id=389 data-nosnippet>389</a>        <span class="kw">let </span>pool = connection::pool_builder()
 <a href=#390 id=390 data-nosnippet>390</a>            .max_size(<span class="number">10</span>)
 <a href=#391 id=391 data-nosnippet>391</a>            .connection_customizer(Box::new(connection::BusyTimeout))
 <a href=#392 id=392 data-nosnippet>392</a>            .build(manager)
@@ -2214,5 +2214,19 @@
 <a href=#2214 id=2214 data-nosnippet>2214</a>        drop(store);
 <a href=#2215 id=2215 data-nosnippet>2215</a>        std::fs::remove_file(path).unwrap();
 <a href=#2216 id=2216 data-nosnippet>2216</a>    }
-<a href=#2217 id=2217 data-nosnippet>2217</a>}
+<a href=#2217 id=2217 data-nosnippet>2217</a>
+<a href=#2218 id=2218 data-nosnippet>2218</a>    <span class="doccomment">/// The store's own pool lends connections without r2d2's `SELECT 1`
+<a href=#2219 id=2219 data-nosnippet>2219</a>    /// (see `connection::pool_builder`); a pool passed in keeps its policy.
+<a href=#2220 id=2220 data-nosnippet>2220</a>    </span><span class="attr">#[tokio::test]
+<a href=#2221 id=2221 data-nosnippet>2221</a>    </span><span class="kw">async fn </span>only_the_store_owned_pool_lends_without_testing_the_connection() {
+<a href=#2222 id=2222 data-nosnippet>2222</a>        <span class="kw">let </span>store = <span class="kw">super</span>::SqliteEventStore::new(<span class="string">":memory:"</span>).<span class="kw">await</span>.unwrap();
+<a href=#2223 id=2223 data-nosnippet>2223</a>        <span class="macro">assert!</span>(!store.pool.test_on_check_out());
+<a href=#2224 id=2224 data-nosnippet>2224</a>        <span class="kw">let </span>injected = diesel::r2d2::Pool::builder()
+<a href=#2225 id=2225 data-nosnippet>2225</a>            .max_size(<span class="number">1</span>)
+<a href=#2226 id=2226 data-nosnippet>2226</a>            .build(<span class="kw">super</span>::ConnectionManager::new(<span class="string">":memory:"</span>))
+<a href=#2227 id=2227 data-nosnippet>2227</a>            .unwrap();
+<a href=#2228 id=2228 data-nosnippet>2228</a>        <span class="kw">let </span>store = <span class="kw">super</span>::SqliteEventStore::with_pool(injected);
+<a href=#2229 id=2229 data-nosnippet>2229</a>        <span class="macro">assert!</span>(store.pool.test_on_check_out());
+<a href=#2230 id=2230 data-nosnippet>2230</a>    }
+<a href=#2231 id=2231 data-nosnippet>2231</a>}
 </code></pre></div></section></main></body></html>
