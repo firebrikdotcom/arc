@@ -93,8 +93,8 @@ is unchanged (WAL is not enabled). This changes contention latency and lock
 acquisition behavior; it ships in 0.9.0, published to crates.io.
 
 Since 0.9.3 the `arc-es-sqlite` stores queue their operations first-in,
-first-out per database file inside one process (writers take turns; reads
-wait only for a commit), because SQLite's busy retry is not fair and sustained contention
+first-out per database file inside one process (writers take turns; in
+rollback-journal mode reads wait only for a commit), because SQLite's busy retry is not fair and sustained contention
 longer than the timeout could starve one caller into `database is locked`. No
 API or setting changes. The busy timeout still bounds locks held by another
 process or by connections opened outside these stores

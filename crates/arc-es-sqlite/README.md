@@ -49,34 +49,41 @@ Existing unsigned data must be replayed or migrated before enabling integrity ve
 
 ## Concurrency
 
-SQLite admits one writer per database file, and in the default rollback-journal mode a commit
-also excludes readers. Connections built by the stores wait up to 5 seconds for the file
-(`busy_timeout`); pools passed to `with_pool` keep the caller's setting. Journal mode is left as
-the database has it (WAL is not enabled by this crate).
+SQLite admits one writer per database file. In the default rollback-journal mode a commit also
+excludes readers; in WAL mode readers and writers do not block each other. Connections built by
+the stores wait up to 5 seconds for the file (`busy_timeout`); pools passed to `with_pool` keep
+the caller's setting. Journal mode is left as the database has it (this crate does not enable
+WAL).
 
 SQLite's wait is a poll and is not fair: under sustained contention one connection can lose
 every retry and fail with `database is locked` although nobody held the file for long. The
 stores therefore queue among themselves, per database file, before they enter SQLite:
 
 - writers take turns first-in, first-out, each for one `BEGIN IMMEDIATE` transaction;
-- reads run together, and beside a writer until it commits;
-- a commit waits for the reads already running, and reads that arrive during it all run before
-  the next commit begins.
+- in rollback-journal mode, reads run together and beside a writer until it commits; a commit
+  gives the reads already running 20 ms to finish, and reads that arrive during it all run
+  before the next commit begins;
+- in WAL mode reads are not queued and commits do not wait for them.
 
 This covers `SqliteEventStore`, `SqliteReadModelStore`, `SqliteSessionStore` and
-`SqliteAccessLogger`, across all stores and pools in the process that open the same file,
-whatever spelling of the path they were given. The queue is held on the blocking thread for one
-operation and never across an `await`.
+`SqliteAccessLogger` (which only writes), across all stores and pools in the process that open
+the same file, whatever spelling of the path they were given. The queue is held on the blocking
+thread for one operation and never across an `await`.
 
 Limits:
 
 - Fairness is per process. Another process, or a connection opened outside these stores on the
   same file, still competes through SQLite's busy timeout, and an operation can fail with
-  `database is locked` when such a lock outlasts it. A writer that queued behind one refused
-  this way for the whole timeout fails with the same error rather than waiting a second timeout.
-- A queued operation waits for those ahead of it without a deadline of its own; each of those is
-  bounded by its busy timeout. A long read delays the commits behind it, as it would inside
-  SQLite.
+  `database is locked` when such a lock outlasts it. A writer always makes its own attempt; the
+  time it spent queued behind attempts that such a lock refused is taken off the busy timeout
+  of that attempt, so queueing does not multiply the wait.
+- The queue orders callers and leaves the locking to SQLite. A read that is still running after
+  the 20 ms (a long read, or one waiting for a transaction that outgrew the page cache and
+  holds the file exclusively) is arbitrated by SQLite's busy timeout as before.
+- A queued writer waits for the writers ahead of it without a deadline of its own; each of
+  those is bounded by its busy timeout.
+- The journal mode is read once, by a store's first operation. A database switched to WAL
+  while stores are open keeps its reads queued until the stores are reopened.
 - In-memory and temporary databases have no file and are not queued.
 - Two hard links to one database file count as two files (SQLite does not support that either).
 

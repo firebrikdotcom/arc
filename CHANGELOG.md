@@ -49,20 +49,21 @@
   every retry for the whole 5-second busy timeout although nobody held the file for long.
   `SqliteEventStore`, `SqliteReadModelStore`, `SqliteSessionStore` and `SqliteAccessLogger`
   now queue among themselves, per database file, before they enter SQLite: writers take turns
-  first-in, first-out; reads run together and beside a writer until it commits; a commit waits
-  for the reads already running, and reads that arrive during it all run before the next
-  commit. The queue is shared by all stores and pools of the process that open the same file,
-  under any spelling of its path, and is held on the blocking thread for one operation, never
-  across an `await`. No public API, journal mode, durability or busy-timeout setting changes.
+  first-in, first-out. In rollback-journal mode reads run together and beside a writer until
+  it commits; a commit gives the reads already running 20 ms to finish, and reads that arrive
+  during it all run before the next commit. In WAL mode reads are not queued. The queue is
+  shared by all stores and pools of the process that open the same file, under any spelling
+  of its path, and is held on the blocking thread for one operation, never across an `await`.
+  No public API, journal mode, durability or busy-timeout setting changes.
 - Read-model upserts, deletes and truncates, publication acknowledgements, snapshot saves and
   session writes now run as one `BEGIN IMMEDIATE` transaction each, as appends already did,
   instead of a bare statement. The effect of each is the same.
 - Unchanged, and still bounded by the busy timeout: contention with another process or with
   a connection opened outside these stores (including `arc-auth-db` and an application's own
-  Diesel pool on the same file). A writer that queued behind one refused by such a lock for
-  the whole timeout reports `database is locked` as well, instead of starting a second full
-  timeout. A queued operation has no deadline of its own, only the bounded operations ahead
-  of it. In-memory databases are not queued.
+  Diesel pool on the same file), and a read that outlasts the 20 ms. A writer always makes
+  its own attempt; time it queued behind attempts refused by such a lock is taken off that
+  attempt's busy timeout. A queued writer has no deadline of its own, only the bounded
+  writers ahead of it. In-memory databases are not queued.
 
 ## 0.9.2 — 2026-11-19
 

@@ -39,8 +39,9 @@ take precedence when a claim here becomes stale.
   `TMPDIR`, against the 5-second busy timeout. Present in released 0.9.2.
 - Fix (`crates/arc-es-sqlite/src/file_gate.rs`): the stores queue among themselves per
   database file before entering SQLite. Writers take turns first-in, first-out for one
-  `BEGIN IMMEDIATE` transaction; reads run together and beside a writer until it commits; a
-  commit waits for running reads, and reads arriving during it all run before the next commit.
+  `BEGIN IMMEDIATE` transaction; in rollback-journal mode reads run together and beside a
+  writer until it commits, a commit gives running reads 20 ms to finish, and reads arriving
+  during it all run before the next commit. In WAL mode reads are not queued.
   The gate is found through the file name SQLite reports, so every store, pool and path
   spelling in the process shares it. No API, journal-mode, durability or busy-timeout change.
   Single-statement writes now run in a `BEGIN IMMEDIATE` transaction like appends.
@@ -54,13 +55,32 @@ take precedence when a claim here becomes stale.
   whole-binary runs failed at `load`).
 - Regression tests, independent of disk speed: slowed commits against a 100 ms busy timeout
   (30 of 30 runs fail without the fix), a one-connection pool shared by readers and writers,
-  and unit tests of ordering, path spellings, nesting, panics and the external-lock rule.
-  `cargo test --all-features` passes with the default `TMPDIR` and with the disk one (432
-  tests each); CI has not run on this branch yet.
+  a transaction larger than the page cache beside readers, a WAL write beside a running read,
+  and unit tests of ordering, path spellings, nesting, panics and the outside-lock accounting.
+  `cargo test --all-features` passes with the default `TMPDIR` and with the disk one (437
+  tests each). The disk loops were repeated on the reviewed version: 0 of 40 and 0 of 100.
+- Review round (2026-11-20, same branch). Three regressions of the first version against
+  0.9.2 were measured and removed. (1) A transaction larger than the page cache holds the file
+  exclusively before commit, so admitted readers waited for it inside SQLite while its commit
+  waited for them in the queue: an 8 MB append beside four readers took 5.08 s with 4 reader
+  errors, against 0.23 s and none before the change; the wait for running reads is now
+  bounded (20 ms) and the same run takes 0.23 s with no errors. `PRAGMA cache_spill = OFF`
+  was not used: it makes memory grow with the transaction (a truncate dirties the whole
+  table) and would alter callers' connections. (2) On WAL databases reads were queued behind
+  commits (an append behind a 1.5 s read: 0.58 ms before, 1.40 s first version); the journal
+  mode is now read with the file name and WAL reads are not queued (0.62 ms). (3) A writer
+  queued behind an attempt refused by an outside lock was failed without an attempt; now it
+  always attempts, with the time it queued behind refused attempts taken off its busy
+  timeout (700 ms outside lock, 300 ms timeout, one writer at 390 ms and nine at 410 ms,
+  five rounds: 45 of 50 locked on 0.9.2, 50 of 50 first version, 5 of 50 now; no writer
+  waited longer than 303 ms). Without any such rule
+  `external_writer_exhausts_bounded_timeout_and_pools_recover` takes 10.0 s and fails.
+  The access journal no longer holds readers back.
 - Limits: fairness is per process. Other processes and connections opened outside these stores
   (`arc-auth-db`, and `arc-web`'s `get_connection` pool that the reference application's
-  migration command uses) still compete through the busy timeout. A queued
-  operation has no deadline of its own. In-memory databases are not queued.
+  migration command uses) still compete through the busy timeout, as does a read that outlasts
+  the 20 ms. A queued writer has no deadline of its own. In-memory databases are not queued.
+  The journal mode is read once per store.
 
 ## Patched SQLite dependency — 0.9.3, not yet published — 2026-11-19
 
