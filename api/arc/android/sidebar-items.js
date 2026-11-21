@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"constant":["CHECKOUT_ERROR","FILES","MANIFEST_FORMAT","MANIFEST_PATH"],"enum":["ArcSource"],"fn":["arc_source","checkout","content_hash","create_project","diagnostics","doctor","generate_project","identifiers","is_content_hash","java_major","read_manifest","render"],"struct":["AndroidManifest","SystemProbe"],"trait":["Probe"]};
