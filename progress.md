@@ -1,10 +1,11 @@
 # Arc Project Progress
 
-**Last updated:** 2026-11-06
-**Current development version:** 0.9.3
-**Latest published version:** 0.9.2
-**Status:** All fourteen 0.9.2 packages are published to crates.io (2026-11-19) with the
-`arc-es-postgres` write guard and patched Actix dependencies, on top of the 0.9.1 security,
+**Last updated:** 2026-11-21
+**Current development version:** 0.9.4
+**Latest published version:** 0.9.4
+**Status:** All fourteen 0.9.4 packages are published to crates.io (2026-11-21) with the
+`arc-es-sqlite` first-read fix, on top of the 0.9.3 sqlx-facade removal, the Diesel Android template and the `arc-es-sqlite` per-file queue, on top of the 0.9.2
+`arc-es-postgres` write guard and patched Actix dependencies and the 0.9.1 security,
 delivery and verification fixes below. v0.9.0 is the Phase 2 release: WebSocket and
 projection security hardening (breaking; see [Upgrading](docs/upgrading.md)), the
 headless `arc-stack` and native `arc-ffi` adapters (first published in this release),
@@ -30,7 +31,32 @@ observability, and developer experience.
 This is the canonical project-status and roadmap tracker. Current source code and accepted ADRs
 take precedence when a claim here becomes stale.
 
-## SQLite in-process fairness — 0.9.3, not yet published — 2026-11-20
+## SQLite first read on a new connection — 0.9.4 — 2026-11-21
+
+- Problem: after the 0.9.3 queue, the first statement on a new connection still ran outside it.
+  It loads the schema and needs a shared lock, and it was r2d2's `SELECT 1` at check-out and the
+  stores' journal-mode question, so under nonstop commits in rollback-journal mode it polled with
+  SQLite's unfair busy retry and could stall for seconds. Present in released 0.9.3.
+- Fix (`crates/arc-es-sqlite`, commit cec265d): pools built by the stores (`new`) lend connections
+  without r2d2's check-out test (`connection::pool_builder`), and the journal mode is asked as a
+  queued read under a read permit. SQLite connections do not go stale and Diesel still has r2d2
+  discard a connection left in a broken transaction. No public API change. Found in review:
+  `SqliteAccessLogger` set `PRAGMA synchronous` (which loads the schema) on each new connection
+  before taking the write slot; it now does so after, in its turn.
+- Measured (4 tasks appending nonstop for 12 s through one `SqliteEventStore`, rollback journal,
+  btrfs on a real disk, 3 runs, debug build): first `get` on a fresh `SqliteReadModelStore::new`,
+  before max 8.4 / 6.0 / 4.0 s with 8 of 15 attempts over 500 ms; after max 7.8 / 21.9 / 36.7 ms
+  with 0 of 15 over 500 ms. A bare `SELECT 1` on a connection opened outside the stores is
+  unchanged (up to 4.2 s after, 3.3 s before). The stall did not reproduce on tmpfs.
+- Limit: pools passed to `with_pool` keep the caller's policy; with r2d2's default
+  `test_on_check_out(true)` each new connection's `SELECT 1` still runs outside the queue and can
+  stall up to the busy timeout. Callers sharing a file with heavy writers can build the pool with
+  `test_on_check_out(false)`. Documented in the `arc-es-sqlite` README and the changelog.
+- README correction: `SqliteSessionStore::new` does not set the 5-second busy timeout; the
+  sentence now names the stores that do.
+- Status: released as 0.9.4 on 2026-11-21 (tag `v0.9.4`, fourteen crates on crates.io).
+
+## SQLite in-process fairness — 0.9.3 — 2026-11-20
 
 - Problem: `arc-es-sqlite` could return `database is locked` from an append, a projection write
   or a read under sustained contention inside one process, because SQLite's busy retry is a
@@ -88,7 +114,7 @@ take precedence when a claim here becomes stale.
   the 20 ms. A queued writer has no deadline of its own. In-memory databases are not queued.
   The journal mode is read once per store.
 
-## Patched SQLite dependency — 0.9.3, not yet published — 2026-11-19
+## Patched SQLite dependency — 0.9.3 — 2026-11-19
 
 - `arc-es-postgres` depends on `sqlx-core` and `sqlx-postgres` 0.8 instead of the `sqlx`
   facade, whose optional MySQL and SQLite drivers stayed in `Cargo.lock`. Arc's lockfile now

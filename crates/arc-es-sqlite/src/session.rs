@@ -71,7 +71,7 @@ pub struct SqliteSessionStore {
 impl SqliteSessionStore {
     pub async fn new(database_url: &str) -> Result<Self, SessionStoreError> {
         let manager = ConnectionManager::<SqliteConnection>::new(database_url);
-        let pool = Pool::builder()
+        let pool = crate::connection::pool_builder()
             .max_size(10)
             .build(manager)
             .map_err(|e| SessionStoreError::Sink(format!("failed to create pool: {e}")))?;
@@ -340,6 +340,13 @@ mod tests {
         assert_eq!(n, 1);
         assert!(s.is_valid(live, now + 1).await.unwrap());
         assert!(!s.is_valid(dead, now + 1).await.unwrap());
+    }
+
+    /// See `connection::pool_builder`.
+    #[tokio::test]
+    async fn the_store_owned_pool_lends_without_testing_the_connection() {
+        let store = SqliteSessionStore::new(":memory:").await.unwrap();
+        assert!(!store.pool.test_on_check_out());
     }
 
     #[tokio::test]

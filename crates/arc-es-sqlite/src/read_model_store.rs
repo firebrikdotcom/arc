@@ -58,7 +58,7 @@ impl SqliteReadModelStore {
     /// Build a new store from a database URL. Creates a small r2d2 pool.
     pub async fn new(database_url: &str) -> ReadModelResult<Self> {
         let manager = ConnectionManager::<SqliteConnection>::new(database_url);
-        let pool = Pool::builder()
+        let pool = crate::connection::pool_builder()
             .max_size(10)
             .connection_customizer(Box::new(crate::connection::BusyTimeout))
             .build(manager)
@@ -710,6 +710,7 @@ mod connection_tests {
             .await
             .unwrap();
         crate::connection::assert_timeout_on_replacement(&store.pool);
+        assert!(!store.pool.test_on_check_out());
         drop(store);
         std::fs::remove_file(path).unwrap();
     }
