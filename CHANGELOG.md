@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.5 — 2026-11-26
+
 ### Added
 
 - `arc console` opens an irust REPL for the Arc application in the current
