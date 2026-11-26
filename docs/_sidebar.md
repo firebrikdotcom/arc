@@ -13,6 +13,7 @@
   * [Native Adapters](ffi.md)
   * [Configuration](configuration.md)
   * [Testing](testing.md)
+  * [Application Console](console.md)
 
 * Plugins
   * [Plugin Overview](auth-plugins.md)

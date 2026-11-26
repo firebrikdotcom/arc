@@ -31,6 +31,19 @@ observability, and developer experience.
 This is the canonical project-status and roadmap tracker. Current source code and accepted ADRs
 take precedence when a claim here becomes stale.
 
+## Application console (`arc console`) — unreleased — 2026-11-25
+
+- `arc console` (`crates/arc-cli/src/console.rs`) opens an irust REPL for the application in the
+  current directory. Generated binary-only apps cannot be depended on, so the command generates a
+  console workspace under `target/arc-console/`: irust's prelude crate (`IRUST_DATA_DIR`) declares
+  the app's `[dependencies]`, shares its copied `Cargo.lock` and target directory, compiles the
+  app's top-level `src/` modules in place via `#[path]`, and adds `.env`, store and arc-auth-db
+  helpers. Modules or helpers that fail to compile are dropped with a warning.
+- irust remains an external tool on `PATH`; a fake `irust`/`cargo` integration test covers the
+  launch contract, refusal paths and unchanged application files. Manually exercised against a
+  copy of a generated 0.9.4 SQLite app (listing users and read-model rows). Not yet released.
+- Docs: [Application Console](docs/console.md).
+
 ## SQLite first read on a new connection — 0.9.4 — 2026-11-21
 
 - Problem: after the 0.9.3 queue, the first statement on a new connection still ran outside it.

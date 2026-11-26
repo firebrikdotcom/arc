@@ -80,6 +80,16 @@ make migrate
 This creates and registers the aggregate, commands, events, projector, read-model migration,
 focused tests, and JSON CRUD routes. Existing resources are never overwritten.
 
+Open an [irust](https://github.com/sigmaSd/IRust) REPL prepared for the application
+(its dependencies, `.env`, modules, and helpers such as `users()` and `rows(table)`):
+
+```bash
+cargo install irust
+arc console
+```
+
+See [Application Console](docs/console.md).
+
 Requirements: stable Rust, SQLite development libraries, and `make`.
 
 ## Contributing to Arc
