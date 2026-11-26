@@ -727,6 +727,7 @@ fn write_prelude(app: &App, console_dir: &Path, selection: &Selection) -> Result
 }
 
 /// Entries of the application root the prelude never links to.
+#[cfg(unix)]
 const UNLINKED: &[&str] = &["src", "target", "Cargo.toml", "Cargo.lock", "build.rs"];
 
 /// Links the application's top-level files and directories (`resources`,
