@@ -2,9 +2,9 @@
 
 **Last updated:** 2026-11-26
 **Current development version:** 0.9.5
-**Latest published version:** 0.9.4
-**Status:** All fourteen 0.9.4 packages are published to crates.io (2026-11-21) with the
-`arc-es-sqlite` first-read fix, on top of the 0.9.3 sqlx-facade removal, the Diesel Android template and the `arc-es-sqlite` per-file queue, on top of the 0.9.2
+**Latest published version:** 0.9.5
+**Status:** All fourteen 0.9.5 packages are published to crates.io (2026-11-26) with the
+`arc console` command, on top of the 0.9.4 `arc-es-sqlite` first-read fix, on top of the 0.9.3 sqlx-facade removal, the Diesel Android template and the `arc-es-sqlite` per-file queue, on top of the 0.9.2
 `arc-es-postgres` write guard and patched Actix dependencies and the 0.9.1 security,
 delivery and verification fixes below. v0.9.0 is the Phase 2 release: WebSocket and
 projection security hardening (breaking; see [Upgrading](docs/upgrading.md)), the
@@ -41,8 +41,8 @@ take precedence when a claim here becomes stale.
   helpers. Modules or helpers that fail to compile are dropped with a warning.
 - irust remains an external tool on `PATH`; a fake `irust`/`cargo` integration test covers the
   launch contract, refusal paths and unchanged application files. Manually exercised against a
-  copy of a generated 0.9.4 SQLite app (listing users and read-model rows). Prepared as 0.9.5;
-  not yet published.
+  copy of a generated 0.9.4 SQLite app (listing users and read-model rows). Released as 0.9.5 on
+  2026-11-26 (tag `v0.9.5`, fourteen crates on crates.io).
 - Docs: [Application Console](docs/console.md).
 
 ## SQLite first read on a new connection — 0.9.4 — 2026-11-21
