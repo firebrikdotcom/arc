@@ -1,6 +1,8 @@
 # Published Packages
 
-The latest published package version is **0.9.4**. Source version **0.9.4** fixes a stall of the first read on a new `arc-es-sqlite` connection under
+The latest published package version is **0.9.4**. Source version **0.9.5** (prepared,
+not yet published) adds the `arc console` command, an irust REPL prepared for an application;
+0.9.4 fixes a stall of the first read on a new `arc-es-sqlite` connection under
 nonstop commits; 0.9.3 removes
 the `sqlx` facade from `arc-es-postgres` so Arc's lockfile carries a patched `libsqlite3-sys`,
 with no API change, and queues `arc-es-sqlite` operations per database file; 0.9.2 adds
