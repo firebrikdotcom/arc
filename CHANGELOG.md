@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.9.5 — 2026-11-26
+
+### Added
+
+- `arc console` opens an irust REPL for the Arc application in the current
+  directory. It generates a console crate under `target/arc-console/` that uses
+  the application's dependencies at its locked versions, loads its `.env`,
+  compiles its top-level modules in place (skipping, with a warning, any that
+  only compile inside the application binary), and provides helpers such as
+  `users()`, `rows(table)`, `stores()` and `block_on(future)`. irust stays an
+  external tool (`cargo install irust`); the command refuses outside an
+  application root and never modifies the application's sources, `.env` or
+  database. See `docs/console.md`.
+
 ## 0.9.4 — 2026-11-21
 
 ### Fixed

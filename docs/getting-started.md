@@ -31,6 +31,7 @@ arc generate aggregate --help
 arc plugin --help
 arc plugin add --help
 arc plugin migrate-auth-ui --help
+arc console --help
 ```
 
 Help works before or after a resource, project, or plugin name, including when a
@@ -99,6 +100,23 @@ make test
 Arc creates and registers a Product aggregate, commands, events, projector, read-model migration,
 focused tests, JWT-protected JSON CRUD API, and session-protected browser pages. It refuses to
 overwrite an existing resource. Continue with [Build an Event-Sourced Resource](resources.md).
+
+## 6. Explore the application in a console
+
+With [irust](https://github.com/sigmaSd/IRust) installed (`cargo install irust`),
+open a REPL with the application's dependencies, `.env`, modules and data
+helpers loaded:
+
+```bash
+arc console
+```
+
+```text
+In: users().len()
+Out: 1
+```
+
+See [Application Console](console.md) for the helpers and limits.
 
 ## Port 8080 is busy
 

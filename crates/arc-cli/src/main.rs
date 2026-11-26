@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 mod android;
+mod console;
 mod plugin;
 mod resource;
 mod scaffold;
@@ -195,6 +196,20 @@ fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
             }
             Ok(())
         }
+        Some("console") => {
+            let mut options = console::ConsoleOptions {
+                app_modules: true,
+                irust_args: Vec::new(),
+            };
+            while let Some(argument) = args.next() {
+                match argument.as_str() {
+                    "--no-app-modules" => options.app_modules = false,
+                    "--" => options.irust_args.extend(args.by_ref()),
+                    unknown => return Err(format!("unknown option `{unknown}`")),
+                }
+            }
+            console::run(std::path::Path::new("."), &options)
+        }
         Some("doctor") => {
             if args.next().as_deref() != Some("--android") {
                 return Err("usage: arc doctor --android".into());
@@ -243,7 +258,15 @@ fn run(args: impl Iterator<Item = String>) -> Result<(), String> {
 }
 
 fn print_requested_help(args: &[String]) -> Result<bool, String> {
-    let Some(position) = args
+    // Arguments after `arc console --` belong to irust.
+    let scanned = match args.first().map(String::as_str) {
+        Some("console") => args
+            .iter()
+            .position(|arg| arg == "--")
+            .map_or(args, |end| &args[..end]),
+        _ => args,
+    };
+    let Some(position) = scanned
         .iter()
         .position(|arg| matches!(arg.as_str(), "--help" | "-h"))
     else {
@@ -254,6 +277,7 @@ fn print_requested_help(args: &[String]) -> Result<bool, String> {
     match command {
         Some("--help" | "-h") => print_help(),
         Some("new") => print_new_help(),
+        Some("console") => print_console_help(),
         Some("doctor") => println!("Diagnose Android prerequisites without installing anything\n\nUsage:\n  arc doctor --android\n\nOptions:\n  --android  Check Rust, SDK, NDK, Java and emulator tooling\n  -h, --help Show help"),
         Some("generate") => match subcommand {
             None => println!("Generate application resources\n\nUsage:\n  arc generate <command>\n\nCommands:\n  resource    Generate an event-sourced CRUD resource\n  aggregate   Alias for resource\n\nOptions:\n  --ffi  Generate native resource adapters in an Arc Android project; incompatible with --api, --ui, --api-auth, --ui-auth, and --roles\n  -h, --help  Show help"),
@@ -282,6 +306,7 @@ Usage:
   arc plugin add <name>
   arc plugin migrate-auth-ui
   arc doctor --android
+  arc console [--no-app-modules] [-- IRUST_ARGS...]
   arc generate resource <name> [--api] [--ui] [--api-auth jwt] [--ui-auth session] [--roles admin,user]
   arc generate aggregate <name> [--api] [--ui]
 
@@ -312,6 +337,29 @@ Options:
   --roles LIST        Require any listed role (requires auth)
   -h, --help          Show help
 
+Run this command from the root of an application created by `arc new`."
+    );
+}
+
+fn print_console_help() {
+    println!(
+        "Open an irust REPL prepared for the Arc application in the current directory
+
+Usage:
+  arc console [--no-app-modules] [-- IRUST_ARGS...]
+
+Options:
+  --no-app-modules  Do not compile the application's own src/ modules into the session
+  -h, --help        Show help
+
+Arguments after `--` are passed to irust (for example `-- --bare-repl`).
+
+The session can use the application's dependencies at the application's
+versions, its .env, helpers such as users(), rows(table) and block_on(future),
+and the application's modules (for example domain::...). Generated files live
+in target/arc-console/; sources, .env and the database are not modified.
+
+Requires irust on PATH: cargo install irust
 Run this command from the root of an application created by `arc new`."
     );
 }

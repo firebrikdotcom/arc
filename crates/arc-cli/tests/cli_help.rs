@@ -98,6 +98,11 @@ fn every_command_help_is_specific_and_read_only() {
             "arc generate resource <name>",
         ),
         (&["doctor", "--android"], "arc doctor"),
+        (&["console"], "arc console [--no-app-modules]"),
+        (
+            &["console", "--no-app-modules"],
+            "arc console [--no-app-modules]",
+        ),
         (
             &["generate", "resource", "Product", "--api"],
             "arc generate resource <name>",
@@ -142,7 +147,16 @@ fn every_command_help_is_specific_and_read_only() {
         }
     }
     for (command, required_lines) in [
-        (vec!["--help"], vec!["arc doctor --android"]),
+        (vec!["--help"], vec!["arc doctor --android", "arc console"]),
+        (
+            vec!["console", "--help"],
+            vec![
+                "--no-app-modules",
+                "cargo install irust",
+                "target/arc-console",
+                "users()",
+            ],
+        ),
         (
             vec!["generate", "--help"],
             vec![
@@ -252,6 +266,7 @@ fn invalid_commands_and_extra_plugin_arguments_do_not_write() {
         &["plugin", "add"],
         &["plugin", "add", "auth-db", "unexpected"],
         &["plugin", "migrate-auth-ui", "unexpected"],
+        &["console", "--unknown"],
     ];
     for args in cases {
         let output = Command::new(&sandbox.cli)
