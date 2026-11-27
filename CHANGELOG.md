@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## 0.9.6 — 2026-11-27
+
+### Added
+
+- `arc console` write helpers: `dispatch::<A>(command)` dispatches an aggregate
+  command through `CommandBus<A>` on an in-process event bus with the
+  projectors `src/main.rs` registers for `A`, so read models reflect the write
+  at once; `dispatch_with::<A>(command, projectors)` names the projectors
+  explicitly. Writes are replay-guarded per console session: irust reruns
+  earlier statements on every evaluation, and a statement that already wrote
+  returns its first result instead of dispatching again. The helpers refuse
+  with `EVENT_BUS=nats` and are dropped with a warning when they do not
+  compile against the application's Arc version.
+
+### Security
+
+- Upgrade `url` to 2.5.9 (RUSTSEC-2026-0592). The Security Audit temporarily
+  ignores RUSTSEC-2026-0594 (`cookie` 0.16 private-cookie nonce reuse after
+  `fork()`): Actix Web 4 pins `cookie` 0.16 and Arc never forks. The exception
+  goes when Actix Web adopts `cookie` 0.18.3 or later.
+
 ## 0.9.5 — 2026-11-26
 
 ### Added

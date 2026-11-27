@@ -81,9 +81,12 @@ irust imports the generated `irust_prelude` crate into every session:
 | `events(aggregate_id)` | The events of one aggregate, oldest first. |
 | `identities()` | The arc-auth-db `DbIdentityStore` (only with arc-auth-db). |
 | `users()` | Every arc-auth-db user with roles (only with arc-auth-db). |
+| `dispatch::<A>(command)` | Dispatches an aggregate command through `CommandBus<A>` with the projectors `src/main.rs` registers for `A`; returns `Result<Vec<Event>, String>`. Replay-guarded (see below). |
+| `dispatch_with::<A>(command, projectors)` | The same with an explicit `Vec<ProjectorReg>`, for an aggregate the console cannot find in `src/main.rs`. |
 
-The `ReadModelStore`, `EventStore`, `IdentityStore`, `Identity`, `Event` and
-`Row` types are in scope, so their methods can be called directly.
+The `ReadModelStore`, `EventStore`, `IdentityStore`, `Identity`, `Event`,
+`Row`, `Aggregate`, `Command` and `ProjectorReg` types are in scope, so their
+methods can be called directly.
 
 ## Worked example: list the users
 
@@ -108,6 +111,91 @@ In: block_on(read_models().get("products_view", "<id>"))
 Out: Ok(Some(Object {...}))
 ```
 
+## Writing through commands
+
+`dispatch::<A>(command)` changes application state the way the server does:
+it opens the application's stores from `DATABASE_DRIVER`/`DATABASE_URL`,
+builds a `CommandBus<A>` on an in-process event bus with the projectors that
+`src/main.rs` registers for `A` (`.register_aggregate::<A>()` followed by
+`.register_projector(..)` or `.register_projectors(..)`), and dispatches the
+command. Its events are appended to the event store and projected at once, so
+`rows(..)` shows the change immediately. Nothing is written with SQL. Events
+are stamped with the `system` actor, the session id `arc-console-<session>`
+and the user agent `arc console`.
+
+After `arc generate resource post`:
+
+```text
+In: use domain::post::{aggregate::PostAggregate, commands::PostCommand};
+In: let created = dispatch::<PostAggregate>(PostCommand::Create { id: "post-1".into(), name: "First".into() });
+In: 1 + 1
+Out: 2
+Err: arc console: dispatched to Post post-1: 1 event(s) written
+In: events("post-1").len()
+Out: 1
+In: created.clone().map(|events| events.len())
+Out: Ok(1)
+In: rows("posts_view")
+Out: [Object {"id": String("post-1"), "name": String("First"), "version": Number(1)}]
+```
+
+irust runs a statement ending in `;` for the first time with the next
+evaluation, which is why the write is reported under `1 + 1`. irust shows
+anything printed to stderr after `Err:`.
+
+The write helpers refuse when:
+
+- `EVENT_BUS=nats`: the console's in-process bus would not publish the events
+  to NATS or Benthos. Make that write through the running application.
+- `A` is not registered with `.register_aggregate::<A>()` in `src/main.rs`
+  (for example an aggregate added by a plugin or one registered with
+  `register_aggregate_with_stack`), or that registration did not compile in
+  the console. Use `dispatch_with::<A>(command, vec![ProjectorReg::new(MyProjector, MY_VIEW)])`.
+- The session was not started by `arc console`.
+
+A failing command (for example `Create` for an id that already exists) returns
+`Err` with the aggregate's message, as `CommandBus::dispatch` does.
+
+### Replays write once
+
+irust compiles and runs every kept statement again on each evaluation. The
+write helpers keep a journal of the writes made in this session, so the
+statement above dispatched once even though it ran again on every later
+evaluation:
+
+- **Session.** One `arc console` launch. It sets `ARC_CONSOLE_SESSION` (a new
+  id) and `ARC_CONSOLE_DIR`. The journal lives in
+  `target/arc-console/sessions/<session>.jsonl` and is deleted when irust exits.
+- **Identity of a write.** The aggregate type, the source text of the statement
+  that calls the helper, and how many times that same statement text has
+  already written in the current evaluation. A loop that dispatches three
+  commands is three writes. Two identical statements entered one after the
+  other are two writes. Values inside the statement do not matter, so a
+  statement that generates a new id on every run (`Uuid::new_v4()`) still
+  writes once.
+- **Replay.** A statement that already wrote returns its first result,
+  including a recorded `Err`, without dispatching. A command that failed is
+  never retried silently after a later write would let it succeed.
+- **Interrupted writes.** A write is recorded as pending before it is
+  dispatched. If an evaluation dies before recording the result, later runs
+  of that statement return an error instead of retrying. Check `events(id)`,
+  then restart `arc console` to write again.
+- **Evaluated expressions.** A write in the expression being evaluated (input
+  without a trailing `;`, which irust does not keep) always runs, once, and
+  is not journaled. Evaluating it again writes again.
+
+Limits of the guard:
+
+- Re-entering the exact text of a statement that already wrote (for example
+  after `:pop` or `:reset`) replays it. The console then prints
+  `already wrote earlier in this session` and returns the first result. To
+  write again, change the statement, evaluate it as an expression, or restart
+  the console.
+- The guard protects against irust's replays inside one session. It does not
+  coordinate with the running server or with another console.
+- The statement text is read from irust's host crate. If it cannot be read,
+  the call's line and column identify the write instead.
+
 ## Generated files
 
 Everything the console writes lives in `target/arc-console/` inside the
@@ -119,6 +207,7 @@ application:
 | `irust/irust_prelude/` | The generated prelude crate (`IRUST_DATA_DIR`). It links, read-only, to the application's top-level folders so `include_dir!("$CARGO_MANIFEST_DIR/...")` still resolves. |
 | `irust_repls/` | irust's temporary host crates (`IRUST_TEMP_DIR`). |
 | `startup.rs` | The startup file irust loads (`load_env();`). |
+| `sessions/` | The write journal of the running session (see [Replays write once](#replays-write-once)); removed when the session ends. |
 
 These files are regenerated on every launch. Builds use the application's
 target directory (`target/`, or `CARGO_TARGET_DIR`); irust's per-session host
@@ -130,19 +219,31 @@ configuration and history are used unchanged.
 ## Limits
 
 - **Every evaluation reruns the session.** irust compiles and runs all the
-  statements entered so far each time you evaluate something. A statement that
-  writes (dispatching a command, `create_user`, ...) runs again on every later
-  evaluation. Do writes as a single expression without a trailing `;`, or
-  remove the statement with `:pop`. `:reset` clears every statement, including
-  the startup `load_env();` (the helpers still load `.env` themselves; call
-  `load_env()` again before reading raw `std::env::var` values).
+  statements entered so far each time you evaluate something. `dispatch` and
+  `dispatch_with` guard against this (see
+  [Replays write once](#replays-write-once)). Other writes, such as
+  `block_on(identities().create(..))` or a raw `EventStore::append`, are not
+  guarded and run again on every later evaluation: do them as a single
+  expression without a trailing `;`, or remove the statement with `:pop`.
+  `:reset` clears every statement, including the startup `load_env();` (the
+  helpers still load `.env` themselves; call `load_env()` again before reading
+  raw `std::env::var` values).
 - **What you can do is what the application exposes.** Private items of
   application modules are not reachable, and items defined in `src/main.rs`
   itself (for example the `builder()` function or `MIGRATIONS`) are not
   available. Modules that depend on them are skipped.
-- Opening `stores()` or `identities()` connects to the real database the
-  application uses. Writes through them are real writes; Arc store
-  constructors may also create missing Arc tables, as the server does on start.
+- Opening `stores()`, `identities()` or a `dispatch` connects to the real
+  database the application uses. Writes through them are real writes; Arc
+  store constructors may also create missing Arc tables, as the server does on
+  start.
+- On Postgres, a generated application's `migrate` command does not create
+  resource read-model tables. Create the table before dispatching, or the
+  projection fails.
+- `arc console` is tested on Linux only. On Windows it does not link the
+  application's top-level files into the prelude, so modules that read them at
+  compile time (for example with `include_str!`) may be skipped.
+- `dispatch` does not apply the snapshot policy (`.snapshot_policy(..)`).
+  Snapshots are only a load cache, so the written events are the same.
 - `env!("CARGO_PKG_NAME")` inside application modules evaluates to
   `irust_prelude`, and modules that need the application's `build.rs` output
   are skipped.

@@ -122,7 +122,9 @@ fn console_prepares_the_application_and_launches_irust() {
         &bin.join("irust"),
         &format!(
             "pwd -P > {log}/irust-cwd\nprintf '%s\\n' \"$@\" > {log}/irust-args\n\
-             printf '%s\\n%s\\n%s\\n' \"$IRUST_DATA_DIR\" \"$IRUST_TEMP_DIR\" \"$CARGO_TARGET_DIR\" > {log}/irust-env\n\
+             printf '%s\\n%s\\n%s\\n%s\\n' \"$IRUST_DATA_DIR\" \"$IRUST_TEMP_DIR\" \"$CARGO_TARGET_DIR\" \"$ARC_CONSOLE_DIR\" > {log}/irust-env\n\
+             echo \"$ARC_CONSOLE_SESSION\" >> {log}/irust-sessions\n\
+             mkdir -p \"$ARC_CONSOLE_DIR/sessions\" && echo '{{}}' > \"$ARC_CONSOLE_DIR/sessions/$ARC_CONSOLE_SESSION.jsonl\"\n\
              touch \"$CARGO_TARGET_DIR/debug/irust_host_repl_0123\"\n\
              exit \"${{FAKE_IRUST_STATUS:-0}}\"\n",
             log = log.display()
@@ -177,11 +179,15 @@ fn console_prepares_the_application_and_launches_irust() {
     assert_eq!(
         read("irust-env"),
         format!(
-            "{0}\n{0}\n{1}\n",
+            "{0}\n{0}\n{1}\n{0}\n",
             console_dir.display(),
             root.join("target").display()
         )
     );
+    // Each launch is its own write session, and its journal is removed.
+    let session = read("irust-sessions").trim().to_string();
+    assert!(!session.is_empty(), "no ARC_CONSOLE_SESSION");
+    assert!(!console_dir.join("sessions").exists());
     // Two builds: with every module, then without the failing one.
     let cargo_args = read("cargo-args");
     assert_eq!(
@@ -202,6 +208,8 @@ fn console_prepares_the_application_and_launches_irust() {
         "pub use ::arc_core;",
         "pub mod arc_console;",
         "pub mod arc_console_stores;",
+        "pub mod arc_console_writes;",
+        "mod arc_console_guard;",
         &format!("#[path = {:?}]", root.join("src").display().to_string()),
         "    pub mod domain;",
         "pub use arc_app::{domain, ui};",
@@ -209,6 +217,19 @@ fn console_prepares_the_application_and_launches_irust() {
         assert!(lib.contains(expected), "missing {expected:?}:\n{lib}");
     }
     assert!(!lib.contains("pub mod routes;"), "{lib}");
+    // The write helpers know the aggregates registered in main.rs.
+    let registry =
+        fs::read_to_string(console_dir.join("irust/irust_prelude/src/arc_console_registry.rs"))
+            .unwrap();
+    assert!(
+        registry.contains("use crate::domain::AppAggregate;")
+            && registry.contains("TypeId::of::<AppAggregate>()"),
+        "{registry}"
+    );
+    assert!(
+        stderr.contains("dispatch::<Aggregate>(command)"),
+        "{stderr}"
+    );
     let manifest = fs::read_to_string(console_dir.join("irust/irust_prelude/Cargo.toml")).unwrap();
     assert!(manifest.contains("name = \"irust_prelude\""), "{manifest}");
     assert!(manifest.contains("arc-web = \""), "{manifest}");
@@ -245,6 +266,15 @@ fn console_prepares_the_application_and_launches_irust() {
     assert!(output.status.success(), "{output:?}");
     let lib = fs::read_to_string(console_dir.join("irust/irust_prelude/src/lib.rs")).unwrap();
     assert!(!lib.contains("mod arc_app"), "{lib}");
+    // Without application modules the registry cannot name their types.
+    let registry =
+        fs::read_to_string(console_dir.join("irust/irust_prelude/src/arc_console_registry.rs"))
+            .unwrap();
+    assert!(!registry.contains("TypeId"), "{registry}");
+    let sessions = read("irust-sessions");
+    let sessions: Vec<_> = sessions.lines().collect();
+    assert_eq!(sessions.len(), 3);
+    assert!(sessions[0] != sessions[1] && sessions[1] != sessions[2]);
     assert_eq!(snapshot(&app), before);
 }
 

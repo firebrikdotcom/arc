@@ -357,7 +357,13 @@ Arguments after `--` are passed to irust (for example `-- --bare-repl`).
 The session can use the application's dependencies at the application's
 versions, its .env, helpers such as users(), rows(table) and block_on(future),
 and the application's modules (for example domain::...). Generated files live
-in target/arc-console/; sources, .env and the database are not modified.
+in target/arc-console/; sources, .env and the database are not modified while
+the session is prepared.
+
+dispatch::<A>(command) writes through the application's CommandBus with the
+projectors main.rs registers for A. irust reruns earlier statements on every
+evaluation; a statement that already wrote in this session returns its first
+result instead of writing again.
 
 Requires irust on PATH: cargo install irust
 Run this command from the root of an application created by `arc new`."
