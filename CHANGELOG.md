@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+
+- `arc-auth-db` supports PostgreSQL behind its new `postgres` cargo feature.
+  `DbIdentityPlugin::new(url)` and `DbIdentityStore::new(url)` select
+  PostgreSQL when the URL starts with `postgres://` or `postgresql://` and
+  SQLite otherwise; setup creates the `users`, `roles`, `user_roles` and
+  `browser_sessions` tables on either backend (exported as
+  `POSTGRES_IDENTITY_ROLES_MIGRATION` and `POSTGRES_BROWSER_SESSIONS_MIGRATION`).
+  Setup rejects a `DATABASE_DRIVER` that disagrees with the URL.
+
 ## 0.9.6 — 2026-11-27
 
 ### Added

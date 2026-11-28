@@ -60,13 +60,22 @@ Implement these contracts for custom identity providers or authorization policie
 
 ## `arc-auth-db`
 
-The SQLite identity provider owns conventional `users`, `roles`, and `user_roles` tables. This
-plugin-owned schema is separate from event-sourced application aggregates.
+The database identity provider owns conventional `users`, `roles`, `user_roles`, and
+`browser_sessions` tables, created idempotently by `make setup`. This plugin-owned schema is
+separate from event-sourced application aggregates.
+
+SQLite is the default. For PostgreSQL, enable the crate's `postgres` feature (it links libpq) and
+point `DATABASE_URL` at a `postgres://` or `postgresql://` URL; the backend follows the URL scheme:
+
+```toml
+arc-auth-db = { version = "0.9", features = ["postgres"] }
+arc-web = { version = "0.9", features = ["postgres"] }
+```
 
 | Variable | Purpose |
 |---|---|
-| `DATABASE_DRIVER` | Must currently be `sqlite`. |
-| `DATABASE_URL` | SQLite identity database path. |
+| `DATABASE_DRIVER` | Optional; when set, `sqlite` or `postgres`, matching `DATABASE_URL`. |
+| `DATABASE_URL` | SQLite identity database path, or a PostgreSQL URL with the `postgres` feature. |
 | `ARC_SETUP_ADMIN_NAME` | Noninteractive first-admin name. |
 | `ARC_SETUP_ADMIN_EMAIL` | Noninteractive first-admin email. |
 | `ARC_SETUP_ADMIN_PASSWORD` | Noninteractive password. |

@@ -1441,9 +1441,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9824c36a57a17ece4c8883baed41dc3eb81b2b949364c174750acc462e19b5ec"
 dependencies = [
  "bitflags",
+ "byteorder",
  "diesel_derives",
  "downcast-rs",
+ "itoa",
  "libsqlite3-sys",
+ "pq-sys",
  "r2d2",
  "serde_json",
  "sqlite-wasm-rs",
@@ -2823,6 +2826,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
 dependencies = [
  "zerocopy",
+]
+
+[[package]]
+name = "pq-sys"
+version = "0.7.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f334fec535bd34b8d39b7881dbcff395ccc2c287765a6a99b94354f75cf18751"
+dependencies = [
+ "libc",
+ "pkg-config",
+ "vcpkg",
 ]
 
 [[package]]
