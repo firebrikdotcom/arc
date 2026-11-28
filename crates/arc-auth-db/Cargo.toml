@@ -9,9 +9,15 @@ description = "Database identity and role provider plugin for Arc"
 readme = "../../README.md"
 keywords = ["arc", "authentication", "database", "roles", "identity"]
 
+[features]
+default = []
+# PostgreSQL identity storage (diesel's libpq-backed `postgres` driver).
+# Selected at runtime when the database URL starts with postgres:// or postgresql://.
+postgres = ["diesel/postgres"]
+
 [dependencies]
-arc-auth-core = { path = "../arc-auth-core", version = "0.9.5" }
-arc-web = { path = "../arc-web", version = "0.9.5" }
+arc-auth-core = { path = "../arc-auth-core", version = "0.9.6" }
+arc-web = { path = "../arc-web", version = "0.9.6" }
 argon2.workspace = true
 async-trait.workspace = true
 diesel.workspace = true

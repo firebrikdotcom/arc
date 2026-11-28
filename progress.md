@@ -1,7 +1,7 @@
 # Arc Project Progress
 
-**Last updated:** 2026-11-26
-**Current development version:** 0.9.5
+**Last updated:** 2026-11-27
+**Current development version:** 0.9.6
 **Latest published version:** 0.9.5
 **Status:** All fourteen 0.9.5 packages are published to crates.io (2026-11-26) with the
 `arc console` command, on top of the 0.9.4 `arc-es-sqlite` first-read fix, on top of the 0.9.3 sqlx-facade removal, the Diesel Android template and the `arc-es-sqlite` per-file queue, on top of the 0.9.2
@@ -30,6 +30,50 @@ observability, and developer experience.
 
 This is the canonical project-status and roadmap tracker. Current source code and accepted ADRs
 take precedence when a claim here becomes stale.
+
+## Console write helpers — 0.9.6 — 2026-11-27
+
+- `arc console` adds `dispatch::<A>(command)` and `dispatch_with::<A>(command, projectors)`
+  (`crates/arc-cli/src/console.rs`). They build a `CommandBus<A>` with `arc_stack`'s
+  `build_with_driver` on the in-process event bus, with the projectors `src/main.rs` registers for
+  `A` (read from its `.register_aggregate::<A>()` / `.register_projector(..)` chain into a generated
+  registry), so read models reflect the write at once. No SQL; refused with `EVENT_BUS=nats`.
+- Replay guard (`crates/arc-cli/src/console_guard.rs`): each `arc console` launch is a session
+  (`ARC_CONSOLE_SESSION`); a journal under `target/arc-console/sessions/` keys each write by
+  aggregate type, the calling statement's source text in irust's host crate and its occurrence
+  within the evaluation, so irust's reruns return the first result instead of dispatching again.
+  Pending-before-dispatch records prevent silent retries; evaluated expressions always write once.
+- Validated under real irust 1.77.0 on freshly generated 0.9.5 apps with the default `target/`:
+  SQLite (`--ui`, a `post` resource, `auth-db-session`, `make setup`) and Postgres 16 in a
+  disposable Docker container. A dispatch followed by further evaluations produced exactly one
+  dispatch's events. Unit tests cover the guard and the registry parser. The fake-irust
+  integration test covers the session environment. Prepared as 0.9.6;
+  not yet published.
+- Known gap: a generated app's `migrate` command is SQLite-only, so on Postgres a resource's read
+  model table has to be created by hand before projections succeed.
+
+### Console — continuing work
+
+- [ ] Publish the fourteen 0.9.6 crates and review the console write helpers (the harness review was
+  off for this work, so no independent review has run).
+- [ ] Decide the `cookie` advisory: keep the temporary `--ignore RUSTSEC-2026-0594` in the
+  Security Audit, or remove it. Remove the ignore once Actix Web adopts `cookie` 0.18.3 or later.
+- [ ] Make the Makefile `audit` target use the same ignore list as `.github/workflows/security.yml`.
+- [ ] Give generated apps a Postgres path in `migrate` so resource read-model tables exist
+  without hand-written SQL.
+- [ ] Exercise `dispatch` / `dispatch_with` in an interactive terminal (so far only `--bare-repl`).
+- [ ] Observe in a real run: the write helpers' drop-with-warning path and the publish-failure
+  message.
+- [ ] Test the identity helpers (`identities()`, `users()`) on Postgres.
+- [ ] Let a statement with the same text as an earlier write run again without restarting the
+  console (today it replays the first result).
+- [ ] Discover aggregates registered by plugins or `register_aggregate_with_stack`, so they work
+  with `dispatch` and not only `dispatch_with`.
+- [ ] Support writes when `EVENT_BUS=nats` (today refused).
+- [ ] Add guarded identity write helpers for `arc-auth-db` (today unguarded, rerun on each
+  evaluation).
+- [ ] Test `arc console` on macOS and Windows; on Windows the app's top-level files are not
+  linked into the prelude.
 
 ## Application console (`arc console`) — 0.9.5 — 2026-11-26
 

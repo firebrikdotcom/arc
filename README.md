@@ -81,7 +81,8 @@ This creates and registers the aggregate, commands, events, projector, read-mode
 focused tests, and JSON CRUD routes. Existing resources are never overwritten.
 
 Open an [irust](https://github.com/sigmaSd/IRust) REPL prepared for the application
-(its dependencies, `.env`, modules, and helpers such as `users()` and `rows(table)`):
+(its dependencies, `.env`, modules, read helpers such as `users()` and `rows(table)`, and
+`dispatch::<A>(command)` for writes through the `CommandBus`):
 
 ```bash
 cargo install irust

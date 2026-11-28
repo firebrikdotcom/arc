@@ -465,7 +465,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "arc"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "actix",
  "actix-files",
@@ -509,7 +509,7 @@ dependencies = [
 
 [[package]]
 name = "arc-auth-admin"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "actix-session 0.10.1",
  "actix-web",
@@ -523,7 +523,7 @@ dependencies = [
 
 [[package]]
 name = "arc-auth-core"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "arc-core",
  "async-trait",
@@ -533,7 +533,7 @@ dependencies = [
 
 [[package]]
 name = "arc-auth-db"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "arc-auth-core",
  "arc-web",
@@ -548,7 +548,7 @@ dependencies = [
 
 [[package]]
 name = "arc-auth-jwt"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "actix-web",
  "arc-auth-core",
@@ -561,7 +561,7 @@ dependencies = [
 
 [[package]]
 name = "arc-auth-rbac"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "actix",
  "actix-session 0.10.1",
@@ -581,7 +581,7 @@ dependencies = [
 
 [[package]]
 name = "arc-auth-session"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "actix-session 0.10.1",
  "actix-web",
@@ -595,7 +595,7 @@ dependencies = [
 
 [[package]]
 name = "arc-core"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "async-trait",
  "hmac",
@@ -610,7 +610,7 @@ dependencies = [
 
 [[package]]
 name = "arc-es-nats"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "arc-core",
  "async-nats",
@@ -623,7 +623,7 @@ dependencies = [
 
 [[package]]
 name = "arc-es-postgres"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "arc-core",
  "async-trait",
@@ -640,7 +640,7 @@ dependencies = [
 
 [[package]]
 name = "arc-es-sqlite"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "arc-core",
  "async-trait",
@@ -655,7 +655,7 @@ dependencies = [
 
 [[package]]
 name = "arc-ffi"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "arc-core",
  "arc-stack",
@@ -673,7 +673,7 @@ dependencies = [
 
 [[package]]
 name = "arc-stack"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "arc-core",
  "arc-es-postgres",
@@ -697,7 +697,7 @@ dependencies = [
 
 [[package]]
 name = "arc-web"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "actix",
  "actix-files",
@@ -741,7 +741,7 @@ dependencies = [
 
 [[package]]
 name = "arc-web-cli"
-version = "0.9.5"
+version = "0.9.6"
 dependencies = [
  "serde",
  "serde_json",
@@ -1441,9 +1441,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9824c36a57a17ece4c8883baed41dc3eb81b2b949364c174750acc462e19b5ec"
 dependencies = [
  "bitflags",
+ "byteorder",
  "diesel_derives",
  "downcast-rs",
+ "itoa",
  "libsqlite3-sys",
+ "pq-sys",
  "r2d2",
  "serde_json",
  "sqlite-wasm-rs",
@@ -1684,9 +1687,9 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "form_urlencoded"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
+checksum = "afa489199eaffb1211795df1c6236ce1ad0d41a6fa45250add73e3b02420f06e"
 dependencies = [
  "percent-encoding",
 ]
@@ -2823,6 +2826,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
 dependencies = [
  "zerocopy",
+]
+
+[[package]]
+name = "pq-sys"
+version = "0.7.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f334fec535bd34b8d39b7881dbcff395ccc2c287765a6a99b94354f75cf18751"
+dependencies = [
+ "libc",
+ "pkg-config",
+ "vcpkg",
 ]
 
 [[package]]
@@ -4157,9 +4171,9 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "url"
-version = "2.5.8"
+version = "2.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff67a8a4397373c3ef660812acab3268222035010ab8680ec4215f38ba3d0eed"
+checksum = "f00cd2407bb42c0ef17be88d4cf020f5cceffd121665bac9b8b9493a369b3b1a"
 dependencies = [
  "form_urlencoded",
  "idna",

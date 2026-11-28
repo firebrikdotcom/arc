@@ -54,6 +54,30 @@ pub(crate) struct App {
     pub profile: Option<Value>,
     /// Top-level modules declared in `src/main.rs`.
     pub modules: Vec<String>,
+    /// Aggregates (and their projectors) registered on the builder in
+    /// `src/main.rs`, for the write helpers.
+    pub registrations: Vec<Registration>,
+    /// Top-level `use` declarations of `src/main.rs`, so registered type and
+    /// projector expressions resolve in the generated registry.
+    pub uses: Vec<String>,
+}
+
+/// One `.register_aggregate::<A>()` call and the projectors chained after it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Registration {
+    pub aggregate: String,
+    /// Each entry is a Rust expression of type `Vec<ProjectorReg>`-compatible
+    /// item: `Projector(..)` for `register_projector`, `Many(..)` for
+    /// `register_projectors`.
+    pub projectors: Vec<ProjectorExpr>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ProjectorExpr {
+    /// `register_projector(projector, view)`.
+    One { projector: String, view: String },
+    /// `register_projectors(list)`.
+    Many(String),
 }
 
 /// Helper units of the generated prelude. Each one may be dropped if it does
@@ -62,13 +86,28 @@ pub(crate) struct App {
 enum Helper {
     Stores,
     Identity,
+    /// The replay-guarded `dispatch` write helpers.
+    Writes,
+    /// The aggregate/projector registry read from `src/main.rs`. When it is
+    /// not selected an empty registry is generated in its place, so the write
+    /// helpers keep compiling.
+    Registry,
 }
 
 impl Helper {
+    const ALL: [Helper; 4] = [
+        Helper::Stores,
+        Helper::Identity,
+        Helper::Writes,
+        Helper::Registry,
+    ];
+
     fn module(self) -> &'static str {
         match self {
             Helper::Stores => "arc_console_stores",
             Helper::Identity => "arc_console_identity",
+            Helper::Writes => "arc_console_writes",
+            Helper::Registry => "arc_console_registry",
         }
     }
 }
@@ -96,6 +135,12 @@ pub(crate) fn run(root: &Path, options: &ConsoleOptions) -> Result<(), String> {
             Vec::new()
         },
     };
+    if selection.modules.is_empty() {
+        // The registry names application types.
+        selection
+            .helpers
+            .retain(|helper| *helper != Helper::Registry);
+    }
     write_workspace(&app, &console_dir)?;
     eprintln!(
         "Preparing the console crate for {} in {}",
@@ -135,13 +180,18 @@ pub(crate) fn run(root: &Path, options: &ConsoleOptions) -> Result<(), String> {
     }
     print_banner(&app, &selection);
     let startup = console_dir.join("startup.rs");
+    let session = session_id();
     let status = Command::new(&irust)
         .arg(&startup)
         .args(&options.irust_args)
         .current_dir(&app.root)
-        .envs(irust_env(&console_dir, &target_dir))
+        .envs(irust_env(&console_dir, &target_dir, &session))
         .status()
-        .map_err(|error| format!("could not start {}: {error}", irust.display()))?;
+        .map_err(|error| format!("could not start {}: {error}", irust.display()));
+    // The write journal only guards this session's replays.
+    let _ = fs::remove_file(journal_path(&console_dir, &session));
+    let _ = fs::remove_dir(console_dir.join("sessions"));
+    let status = status?;
     remove_host_artifacts(&target_dir);
     if status.success() {
         Ok(())
@@ -152,12 +202,36 @@ pub(crate) fn run(root: &Path, options: &ConsoleOptions) -> Result<(), String> {
 
 /// The environment irust runs with: its prelude and temporary host crates
 /// live in the console workspace, and builds share the application's target.
-pub(crate) fn irust_env(console_dir: &Path, target_dir: &Path) -> Vec<(&'static str, OsString)> {
+/// `ARC_CONSOLE_SESSION` and `ARC_CONSOLE_DIR` scope the write helpers' replay
+/// journal to this launch.
+pub(crate) fn irust_env(
+    console_dir: &Path,
+    target_dir: &Path,
+    session: &str,
+) -> Vec<(&'static str, OsString)> {
     vec![
         ("IRUST_DATA_DIR", console_dir.as_os_str().to_owned()),
         ("IRUST_TEMP_DIR", console_dir.as_os_str().to_owned()),
         ("CARGO_TARGET_DIR", target_dir.as_os_str().to_owned()),
+        ("ARC_CONSOLE_SESSION", session.into()),
+        ("ARC_CONSOLE_DIR", console_dir.as_os_str().to_owned()),
     ]
+}
+
+/// A fresh identifier for one `arc console` launch.
+fn session_id() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or_default();
+    format!("{nanos}-{}", std::process::id())
+}
+
+/// The write journal of a session (see `console_guard.rs`).
+pub(crate) fn journal_path(console_dir: &Path, session: &str) -> PathBuf {
+    console_dir
+        .join("sessions")
+        .join(format!("{session}.jsonl"))
 }
 
 fn target_dir(root: &Path) -> PathBuf {
@@ -248,6 +322,8 @@ pub(crate) fn read_app(root: &Path) -> Result<App, String> {
             .into_iter()
             .filter(|module| module_file(&root, module).is_some())
             .collect(),
+        registrations: registrations(&main),
+        uses: top_level_uses(&main),
         root,
     })
 }
@@ -300,6 +376,160 @@ pub(crate) fn top_level_modules(main: &str) -> Vec<String> {
     modules
 }
 
+/// Top-level `use` declarations of `main.rs`, each as one string.
+pub(crate) fn top_level_uses(main: &str) -> Vec<String> {
+    let mut uses = Vec::new();
+    let mut current: Option<String> = None;
+    let mut depth = 0usize;
+    for line in main.lines() {
+        let trimmed = line.trim();
+        if let Some(statement) = current.as_mut() {
+            statement.push(' ');
+            statement.push_str(trimmed);
+        } else if depth == 0 && (trimmed.starts_with("use ") || trimmed.starts_with("pub use ")) {
+            current = Some(trimmed.to_string());
+        }
+        if current
+            .as_ref()
+            .is_some_and(|statement| statement.ends_with(';'))
+        {
+            uses.extend(current.take());
+        }
+        if current.is_none() {
+            for character in line.chars() {
+                match character {
+                    '{' => depth += 1,
+                    '}' => depth = depth.saturating_sub(1),
+                    _ => {}
+                }
+            }
+        }
+    }
+    uses
+}
+
+/// The `.register_aggregate::<A>()` calls in `main.rs`, each with the
+/// `.register_projector(..)` / `.register_projectors(..)` calls that follow it
+/// (the builder attaches projectors to the most recently registered
+/// aggregate). Aggregates registered with a caller-built stack, or by plugins,
+/// are not listed.
+pub(crate) fn registrations(main: &str) -> Vec<Registration> {
+    // Drop whole-line comments (the generators' `// arc:...` markers); string
+    // literals such as `"postgres://..."` stay intact.
+    let code: String = main
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    const AGGREGATE: &str = ".register_aggregate";
+    let mut found: Vec<Registration> = Vec::new();
+    let mut rest = code.as_str();
+    while let Some(start) = rest.find(AGGREGATE) {
+        let after = &rest[start + AGGREGATE.len()..];
+        rest = after;
+        let Some(generic) = after.trim_start().strip_prefix("::<") else {
+            continue; // `register_aggregate_with_stack` or not a turbofish
+        };
+        let Some((aggregate, tail)) = split_closing(generic, '<', '>') else {
+            continue;
+        };
+        let Some(tail) = tail.trim_start().strip_prefix("()") else {
+            continue;
+        };
+        let aggregate = aggregate.split_whitespace().collect::<String>();
+        let segment = tail.find(AGGREGATE).map_or(tail, |end| &tail[..end]);
+        let mut projectors = Vec::new();
+        let mut scan = segment;
+        while let Some(call) = scan.find(".register_projector") {
+            let after = &scan[call + ".register_projector".len()..];
+            let (many, after) = match after.strip_prefix('s') {
+                Some(after) => (true, after),
+                None => (false, after),
+            };
+            scan = after;
+            let Some(args) = after.trim_start().strip_prefix('(') else {
+                continue;
+            };
+            let Some((args, tail)) = split_closing(args, '(', ')') else {
+                break;
+            };
+            scan = tail;
+            if many {
+                projectors.push(ProjectorExpr::Many(args.trim().to_string()));
+            } else if let Some((projector, view)) = split_top_level_comma(args) {
+                projectors.push(ProjectorExpr::One {
+                    projector: projector.trim().to_string(),
+                    view: view.trim().trim_end_matches(',').trim().to_string(),
+                });
+            }
+        }
+        if !found.iter().any(|known| known.aggregate == aggregate) {
+            found.push(Registration {
+                aggregate,
+                projectors,
+            });
+        }
+    }
+    found
+}
+
+/// Splits `text` at the delimiter closing an already-opened `open`, returning
+/// the enclosed text and what follows the closing delimiter.
+fn split_closing(text: &str, open: char, close: char) -> Option<(&str, &str)> {
+    let mut depth = 1usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (index, character) in text.char_indices() {
+        if in_string {
+            match character {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match character {
+            '"' => in_string = true,
+            c if c == open => depth += 1,
+            c if c == close => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some((&text[..index], &text[index + close.len_utf8()..]));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Splits call arguments at the first comma outside brackets and strings.
+fn split_top_level_comma(args: &str) -> Option<(&str, &str)> {
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (index, character) in args.char_indices() {
+        if in_string {
+            match character {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match character {
+            '"' => in_string = true,
+            '(' | '[' | '{' | '<' => depth += 1,
+            ')' | ']' | '}' | '>' => depth -= 1,
+            ',' if depth == 0 => return Some((&args[..index], &args[index + 1..])),
+            _ => {}
+        }
+    }
+    None
+}
+
 fn is_identifier(name: &str) -> bool {
     let mut chars = name.chars();
     chars
@@ -313,6 +543,7 @@ fn is_identifier(name: &str) -> bool {
 pub(crate) struct HelperCrates {
     pub tokio: String,
     pub dotenvy: String,
+    pub serde_json: String,
     pub auth_core: Option<String>,
 }
 
@@ -336,6 +567,7 @@ fn console_dependencies(dependencies: &Table, root: &Path) -> (Table, HelperCrat
     }
     let tokio = ensure_dependency(&mut result, "tokio", "1".into(), &["rt-multi-thread"]);
     let dotenvy = ensure_dependency(&mut result, "dotenvy", "0.15".into(), &[]);
+    let serde_json = ensure_dependency(&mut result, "serde_json", "1".into(), &[]);
     // The identity helpers name the `IdentityStore` trait, which lives in
     // arc-auth-core: depend on it exactly as the application depends on
     // arc-auth-db.
@@ -365,6 +597,7 @@ fn console_dependencies(dependencies: &Table, root: &Path) -> (Table, HelperCrat
         HelperCrates {
             tokio,
             dotenvy,
+            serde_json,
             auth_core,
         },
     )
@@ -440,6 +673,12 @@ fn helpers_for(app: &App) -> Vec<Helper> {
     }
     if app.dependencies.contains_key("arc-auth-db") && app.crates.auth_core.is_some() {
         helpers.push(Helper::Identity);
+    }
+    if app.dependencies.contains_key("arc-web") && app.dependencies.contains_key("arc-core") {
+        helpers.push(Helper::Writes);
+        if !app.registrations.is_empty() {
+            helpers.push(Helper::Registry);
+        }
     }
     helpers
 }
@@ -527,7 +766,13 @@ fn prelude_source(app: &App, selection: &Selection) -> String {
     source.push_str("\npub mod arc_console;\npub use arc_console::*;\n");
     for helper in &selection.helpers {
         let module = helper.module();
+        if *helper == Helper::Registry {
+            continue; // declared below, with the write helpers
+        }
         source.push_str(&format!("pub mod {module};\npub use {module}::*;\n"));
+    }
+    if selection.helpers.contains(&Helper::Writes) {
+        source.push_str("mod arc_console_guard;\nmod arc_console_registry;\n");
     }
     if !selection.modules.is_empty() {
         let src = app.root.join("src").display().to_string();
@@ -648,6 +893,152 @@ pub fn users() -> Vec<Identity> {
 }
 "#;
 
+const WRITES_HELPERS: &str = r#"//! Writes through the application's `CommandBus`, the way the server makes
+//! them: an in-process event bus drives the registered projectors, so read
+//! models reflect each write at once. Every write is replay-guarded (see
+//! `arc_console_guard`): irust reruns earlier statements on each evaluation,
+//! and a statement that already wrote returns its first result instead of
+//! writing again.
+use super::arc_console::{block_on, database_url, env};
+use super::arc_console_guard::{Journal, Outcome, Site};
+use super::arc_console_registry::registered_projectors;
+
+pub use ::arc_core::aggregate::{Aggregate, Command};
+pub use ::arc_web::ProjectorReg;
+
+/// Dispatches `command` to aggregate `A` with the projectors the application
+/// registers for `A` in `src/main.rs`, for example
+/// `dispatch::<domain::post::aggregate::PostAggregate>(PostCommand::Create { .. })`.
+/// Returns the events the command produced.
+#[track_caller]
+pub fn dispatch<A: Aggregate + 'static>(
+    command: A::Command,
+) -> Result<Vec<::arc_core::event::Event>, String> {
+    let site = Site::of(std::panic::Location::caller());
+    match registered_projectors::<A>() {
+        Some(projectors) => guarded::<A>(&site, command, projectors),
+        None => Err(format!(
+            "aggregate {} is not registered with `.register_aggregate::<..>()` in src/main.rs (or its registration does not compile in the console); use dispatch_with::<A>(command, projectors) to name its projectors",
+            A::aggregate_type()
+        )),
+    }
+}
+
+/// Like [`dispatch`], with an explicit projector list, for aggregates the
+/// console cannot read from `src/main.rs`:
+/// `dispatch_with::<A>(command, vec![ProjectorReg::new(MyProjector, MY_VIEW)])`.
+#[track_caller]
+pub fn dispatch_with<A: Aggregate + 'static>(
+    command: A::Command,
+    projectors: Vec<ProjectorReg>,
+) -> Result<Vec<::arc_core::event::Event>, String> {
+    let site = Site::of(std::panic::Location::caller());
+    guarded::<A>(&site, command, projectors)
+}
+
+fn guarded<A: Aggregate + 'static>(
+    site: &Site,
+    command: A::Command,
+    projectors: Vec<ProjectorReg>,
+) -> Result<Vec<::arc_core::event::Event>, String> {
+    let bus = env("EVENT_BUS").unwrap_or_default().to_ascii_lowercase();
+    if bus == "nats" {
+        return Err("EVENT_BUS=nats: console writes use the in-process event bus and would not reach NATS/Benthos; run the write through the application instead".into());
+    }
+    let journal = Journal::current()?;
+    let aggregate_id = command.aggregate_id().to_string();
+    let label = A::aggregate_type();
+    let (outcome, result) = journal.guard(site, label, || {
+        let events = block_on(async {
+            let stack = ::arc_web::helpers::es_stack::build_with_driver::<A>(
+                ::arc_web::helpers::config::DatabaseDriver::from_env(),
+                &database_url(),
+                projectors,
+                None,
+            )
+            .await
+            .map_err(|error| format!("could not open the application's stores: {error}"))?;
+            let mut context = ::arc_core::command_bus::CommandContext::system();
+            context.session_id = Some(format!("arc-console-{}", journal.session));
+            context.user_agent = Some("arc console".to_string());
+            stack
+                .command_bus
+                .dispatch(command, context)
+                .await
+                .map_err(|error| match error {
+                    ::arc_core::command_bus::CommandBusError::PublishFailed { .. } => format!(
+                        "{error} (the events were appended to the event store; only publishing them to the projectors failed, so the write is not retried)"
+                    ),
+                    other => other.to_string(),
+                })
+        })?;
+        ::__SERDE_JSON__::to_value(&events).map_err(|error| error.to_string())
+    });
+    let events: Vec<::arc_core::event::Event> = match result {
+        Ok(value) => ::__SERDE_JSON__::from_value(value).map_err(|error| error.to_string())?,
+        Err(error) => return Err(error),
+    };
+    if outcome != Outcome::Replayed {
+        eprintln!(
+            "arc console: dispatched to {label} {aggregate_id}: {} event(s) written",
+            events.len()
+        );
+    }
+    Ok(events)
+}
+"#;
+
+/// The guard's source, shared with this crate's unit tests.
+const GUARD_SOURCE: &str = include_str!("console_guard.rs");
+
+// Compiled here only so its unit tests run without irust.
+#[cfg(test)]
+#[allow(dead_code)]
+#[path = "console_guard.rs"]
+mod guard;
+
+/// The aggregate/projector registry the write helpers use. With `enabled`
+/// false (no application modules, nothing registered, or the registry did not
+/// compile), it knows no aggregate.
+fn registry_source(app: &App, enabled: bool) -> String {
+    let mut source = String::from(
+        "//! Aggregates and projectors registered in the application's `src/main.rs`.\n",
+    );
+    if !enabled {
+        source.push_str(
+            "pub fn registered_projectors<A: 'static>() -> Option<Vec<::arc_web::ProjectorReg>> {\n    None\n}\n",
+        );
+        return source;
+    }
+    source.push_str("// `use` declarations of src/main.rs.\n");
+    for declaration in &app.uses {
+        source.push_str(declaration);
+        source.push('\n');
+    }
+    source.push_str(
+        "\npub fn registered_projectors<A: 'static>() -> Option<Vec<::arc_web::ProjectorReg>> {\n    let aggregate = ::std::any::TypeId::of::<A>();\n",
+    );
+    for registration in &app.registrations {
+        source.push_str(&format!(
+            "    if aggregate == ::std::any::TypeId::of::<{}>() {{\n        let mut projectors: Vec<::arc_web::ProjectorReg> = Vec::new();\n",
+            registration.aggregate
+        ));
+        for projector in &registration.projectors {
+            match projector {
+                ProjectorExpr::One { projector, view } => source.push_str(&format!(
+                    "        projectors.push(::arc_web::ProjectorReg::new({projector}, {view}));\n"
+                )),
+                ProjectorExpr::Many(list) => {
+                    source.push_str(&format!("        projectors.extend({list});\n"))
+                }
+            }
+        }
+        source.push_str("        return Some(projectors);\n    }\n");
+    }
+    source.push_str("    None\n}\n");
+    source
+}
+
 /// Statements irust runs at the top of every evaluation.
 const STARTUP: &str = "load_env();\n";
 
@@ -702,6 +1093,7 @@ fn write_prelude(app: &App, console_dir: &Path, selection: &Selection) -> Result
         source
             .replace("__TOKIO__", &app.crates.tokio)
             .replace("__DOTENVY__", &app.crates.dotenvy)
+            .replace("__SERDE_JSON__", &app.crates.serde_json)
             .replace(
                 "__AUTH_CORE__",
                 app.crates.auth_core.as_deref().unwrap_or("arc_auth_core"),
@@ -709,19 +1101,35 @@ fn write_prelude(app: &App, console_dir: &Path, selection: &Selection) -> Result
     };
     write(&src.join("arc_console.rs"), &fill(CONSOLE_HELPERS))?;
     link_app_entries(&app.root, &prelude)?;
-    for helper in [Helper::Stores, Helper::Identity] {
+    let writes = selection.helpers.contains(&Helper::Writes);
+    for helper in Helper::ALL {
         let path = src.join(format!("{}.rs", helper.module()));
-        if selection.helpers.contains(&helper) {
-            write(
-                &path,
-                &fill(match helper {
-                    Helper::Stores => STORES_HELPERS,
-                    Helper::Identity => IDENTITY_HELPERS,
-                }),
-            )?;
-        } else {
-            let _ = fs::remove_file(path);
-        }
+        let contents = match helper {
+            _ if helper == Helper::Registry && writes => {
+                registry_source(app, selection.helpers.contains(&Helper::Registry))
+            }
+            _ if !selection.helpers.contains(&helper) => {
+                let _ = fs::remove_file(path);
+                continue;
+            }
+            Helper::Stores => fill(STORES_HELPERS),
+            Helper::Identity => fill(IDENTITY_HELPERS),
+            Helper::Writes => fill(WRITES_HELPERS),
+            Helper::Registry => unreachable!("the registry is written with the write helpers"),
+        };
+        write(&path, &contents)?;
+    }
+    let guard = src.join("arc_console_guard.rs");
+    if writes {
+        write(
+            &guard,
+            &GUARD_SOURCE.replace(
+                "::serde_json as json",
+                &format!("::{} as json", app.crates.serde_json),
+            ),
+        )?;
+    } else {
+        let _ = fs::remove_file(guard);
     }
     Ok(())
 }
@@ -866,11 +1274,22 @@ fn attribute_errors(
                 dropped.modules.push(module);
             }
         } else if let Ok(relative) = file.strip_prefix(&prelude_src) {
-            for helper in &selection.helpers {
-                if relative == Path::new(&format!("{}.rs", helper.module()))
-                    && !dropped.helpers.contains(helper)
-                {
-                    dropped.helpers.push(*helper);
+            let mut owner = selection
+                .helpers
+                .iter()
+                .copied()
+                .find(|helper| relative == Path::new(&format!("{}.rs", helper.module())));
+            // The guard and the empty registry exist only for the write helpers.
+            if owner.is_none()
+                && (relative == Path::new("arc_console_guard.rs")
+                    || relative == Path::new("arc_console_registry.rs"))
+                && selection.helpers.contains(&Helper::Writes)
+            {
+                owner = Some(Helper::Writes);
+            }
+            if let Some(helper) = owner {
+                if !dropped.helpers.contains(&helper) {
+                    dropped.helpers.push(helper);
                 }
             }
         }
@@ -911,6 +1330,12 @@ fn print_banner(app: &App, selection: &Selection) {
     if selection.helpers.contains(&Helper::Identity) {
         helpers.extend(["identities()", "users()"]);
     }
+    if selection.helpers.contains(&Helper::Writes) {
+        helpers.extend([
+            "dispatch::<Aggregate>(command)",
+            "dispatch_with::<Aggregate>(command, projectors)",
+        ]);
+    }
     eprintln!("Starting irust for {} ({})", app.name, app.root.display());
     eprintln!("  helpers: {}", helpers.join(", "));
     if selection.modules.is_empty() {
@@ -919,6 +1344,9 @@ fn print_banner(app: &App, selection: &Selection) {
         eprintln!("  application modules: {}", selection.modules.join(", "));
     }
     eprintln!("  note: every evaluation reruns the statements entered before it");
+    if selection.helpers.contains(&Helper::Writes) {
+        eprintln!("        dispatch writes once per session; reruns return the first result");
+    }
 }
 
 /// Removes the per-session host binaries irust built into the shared target
@@ -1021,6 +1449,127 @@ arc-core = { path = "vendor/arc-core" }
         assert_eq!(top_level_modules(main), ["domain", "ui", "seed", "limits"]);
     }
 
+    const MAIN: &str = r#"use arc_web::{ArcApp, ArcAppBuilder};
+
+use crate::domain::AppAggregate;
+// arc:resource-imports
+use crate::domain::post::aggregate::PostAggregate;
+use crate::domain::post::projector::{
+    PostProjector, POSTS_VIEW,
+};
+
+mod domain;
+
+fn builder() -> ArcAppBuilder {
+    use crate::inner::Hidden;
+    ArcApp::builder()
+        .register_aggregate::<AppAggregate>()
+        // .register_projector(Commented, OUT)
+        .register_ui(ui::contribution())
+        .register_aggregate::<PostAggregate>()
+        .register_projector(PostProjector, POSTS_VIEW)
+        .register_projector(other::Counter::new("a,b"), "counts_view")
+        .register_aggregate::< Order<Item> >()
+        .register_projectors(vec![ProjectorReg::new(OrderProjector, ORDERS_VIEW)])
+        .register_aggregate_with_stack::<Custom>(stack)
+        .register_projector(NotForCustom, "x")
+        .register_routes(routes::config)
+}
+"#;
+
+    #[test]
+    fn registrations_follow_the_builder_chain() {
+        let found = registrations(MAIN);
+        assert_eq!(
+            found,
+            [
+                Registration {
+                    aggregate: "AppAggregate".into(),
+                    projectors: Vec::new(),
+                },
+                Registration {
+                    aggregate: "PostAggregate".into(),
+                    projectors: vec![
+                        ProjectorExpr::One {
+                            projector: "PostProjector".into(),
+                            view: "POSTS_VIEW".into(),
+                        },
+                        ProjectorExpr::One {
+                            projector: "other::Counter::new(\"a,b\")".into(),
+                            view: "\"counts_view\"".into(),
+                        },
+                    ],
+                },
+                Registration {
+                    aggregate: "Order<Item>".into(),
+                    projectors: vec![ProjectorExpr::Many(
+                        "vec![ProjectorReg::new(OrderProjector, ORDERS_VIEW)]".into()
+                    )],
+                },
+            ]
+        );
+        assert_eq!(
+            top_level_uses(MAIN),
+            [
+                "use arc_web::{ArcApp, ArcAppBuilder};",
+                "use crate::domain::AppAggregate;",
+                "use crate::domain::post::aggregate::PostAggregate;",
+                "use crate::domain::post::projector::{ PostProjector, POSTS_VIEW, };",
+            ]
+        );
+    }
+
+    #[test]
+    fn registry_names_registered_projectors() {
+        let dir = TempDir::new("registry");
+        let mut app = app(&dir.0);
+        app.registrations = registrations(MAIN);
+        app.uses = top_level_uses(MAIN);
+        let source = registry_source(&app, true);
+        for line in [
+            "use crate::domain::post::aggregate::PostAggregate;",
+            "    if aggregate == ::std::any::TypeId::of::<PostAggregate>() {",
+            "        projectors.push(::arc_web::ProjectorReg::new(PostProjector, POSTS_VIEW));",
+            "        projectors.extend(vec![ProjectorReg::new(OrderProjector, ORDERS_VIEW)]);",
+            "    if aggregate == ::std::any::TypeId::of::<AppAggregate>() {",
+        ] {
+            assert!(source.contains(line), "missing {line:?} in\n{source}");
+        }
+        assert!(!source.contains("Custom") && !source.contains("Commented"));
+        let empty = registry_source(&app, false);
+        assert!(empty.contains("None") && !empty.contains("TypeId"));
+        assert!(!empty.contains("use crate"));
+        assert!(helpers_for(&app).contains(&Helper::Registry));
+    }
+
+    #[test]
+    fn sessions_are_scoped_by_the_launch_environment() {
+        let env = irust_env(
+            Path::new("/app/target/arc-console"),
+            Path::new("/t"),
+            "42-7",
+        );
+        let get = |key: &str| {
+            env.iter()
+                .find(|(name, _)| *name == key)
+                .map(|(_, value)| value.clone())
+        };
+        assert_eq!(get("ARC_CONSOLE_SESSION"), Some("42-7".into()));
+        assert_eq!(
+            get("ARC_CONSOLE_DIR"),
+            Some("/app/target/arc-console".into())
+        );
+        assert_eq!(
+            journal_path(Path::new("/c"), "42-7"),
+            Path::new("/c/sessions/42-7.jsonl")
+        );
+        let (a, b) = (session_id(), session_id());
+        assert_ne!(a, b);
+        assert!(a.chars().all(|c| c.is_ascii_digit() || c == '-'));
+        // The guard compiled into the console uses the application's crate.
+        assert!(GUARD_SOURCE.contains("use ::serde_json as json;"));
+    }
+
     #[test]
     fn refuses_directories_that_are_not_arc_applications() {
         let dir = TempDir::new("refuse");
@@ -1064,13 +1613,14 @@ arc-core = { path = "vendor/arc-core" }
             HelperCrates {
                 tokio: "tokio".into(),
                 dotenvy: "dotenvy".into(),
+                serde_json: "serde_json".into(),
                 auth_core: Some("arc_auth_core".into()),
             }
         );
         assert_eq!(
             helpers_for(&app),
-            [Helper::Stores, Helper::Identity],
-            "both helper modules apply"
+            [Helper::Stores, Helper::Identity, Helper::Writes],
+            "no aggregate is registered, so there is no registry"
         );
     }
 
@@ -1162,6 +1712,21 @@ arc-core = { path = "vendor/arc-core" }
             assert!(source.contains(line), "missing {line:?} in\n{source}");
         }
         assert!(!source.contains("arc_console_identity"));
+        assert!(!source.contains("arc_console_guard"));
+        let writes = prelude_source(
+            &app,
+            &Selection {
+                helpers: vec![Helper::Writes, Helper::Registry],
+                modules: vec!["domain".into()],
+            },
+        );
+        for line in [
+            "pub mod arc_console_writes;\npub use arc_console_writes::*;",
+            "mod arc_console_guard;\nmod arc_console_registry;",
+        ] {
+            assert!(writes.contains(line), "missing {line:?} in\n{writes}");
+        }
+        assert!(!writes.contains("pub use arc_console_registry"));
         let bare = prelude_source(
             &app,
             &Selection {
@@ -1210,9 +1775,18 @@ arc-core = { path = "vendor/arc-core" }
             "irust/irust_prelude/src/arc_console.rs",
             "irust/irust_prelude/src/arc_console_stores.rs",
             "irust/irust_prelude/src/arc_console_identity.rs",
+            "irust/irust_prelude/src/arc_console_writes.rs",
+            "irust/irust_prelude/src/arc_console_guard.rs",
+            "irust/irust_prelude/src/arc_console_registry.rs",
         ] {
             assert!(console.join(file).is_file(), "{file}");
         }
+        let prelude_src = console.join("irust/irust_prelude/src");
+        let writes = fs::read_to_string(prelude_src.join("arc_console_writes.rs")).unwrap();
+        assert!(writes.contains("::serde_json::to_value") && !writes.contains("__"));
+        // Nothing is registered in this application: the registry is empty.
+        let registry = fs::read_to_string(prelude_src.join("arc_console_registry.rs")).unwrap();
+        assert!(registry.contains("None") && !registry.contains("TypeId"));
         assert!(!console.join("irust_repls/irust_host_repl_stale").exists());
         #[cfg(unix)]
         {
@@ -1242,6 +1816,13 @@ arc-core = { path = "vendor/arc-core" }
         assert!(!console
             .join("irust/irust_prelude/src/arc_console_identity.rs")
             .exists());
+        for file in [
+            "arc_console_writes.rs",
+            "arc_console_guard.rs",
+            "arc_console_registry.rs",
+        ] {
+            assert!(!prelude_src.join(file).exists(), "{file}");
+        }
         let mut after: Vec<_> = fs::read_dir(&dir.0)
             .unwrap()
             .flatten()
@@ -1284,19 +1865,34 @@ arc-core = { path = "vendor/arc-core" }
                 &src.join("domain/post/ui.rs").display().to_string(),
             ),
             message("irust_prelude", "src/arc_console_identity.rs"),
+            message("irust_prelude", "src/arc_console_guard.rs"),
             message("other", &src.join("domain.rs").display().to_string()),
             "not json".into(),
         ]
         .join("\n");
         let errors = parse_errors(&stdout, &console.join(PRELUDE_DIR));
-        assert_eq!(errors.len(), 3);
+        assert_eq!(errors.len(), 4);
         let selection = Selection {
-            helpers: vec![Helper::Stores, Helper::Identity],
+            helpers: vec![Helper::Stores, Helper::Identity, Helper::Writes],
             modules: vec!["domain".into(), "routes".into()],
         };
         let dropped = attribute_errors(&app, &console, &selection, &errors);
         assert_eq!(dropped.modules, ["routes", "domain"]);
-        assert_eq!(dropped.helpers, [Helper::Identity]);
+        // The guard belongs to the write helpers.
+        assert_eq!(dropped.helpers, [Helper::Identity, Helper::Writes]);
+        // A registry that does not compile is dropped on its own, keeping writes.
+        let registry = parse_errors(
+            &message("irust_prelude", "src/arc_console_registry.rs"),
+            &console.join(PRELUDE_DIR),
+        );
+        let with_registry = Selection {
+            helpers: vec![Helper::Writes, Helper::Registry],
+            modules: Vec::new(),
+        };
+        assert_eq!(
+            attribute_errors(&app, &console, &with_registry, &registry).helpers,
+            [Helper::Registry]
+        );
         assert_eq!(
             first_message(&errors, &src.join("routes")),
             "cannot find value `MIGRATIONS` in the crate root"

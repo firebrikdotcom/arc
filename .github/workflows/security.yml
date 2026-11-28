@@ -36,6 +36,13 @@ jobs:
         # chrono-tz-build (RUSTSEC-2026-0543, -0555, -0559) are unmaintained notices
         # with no fixed release; chrono is used directly, and the chrono-tz pair comes
         # from Tera 1's built-in date filter, which has no chrono-free 1.x release.
+        # cookie 0.16 (RUSTSEC-2026-0594, private-cookie nonce reuse after fork()) is
+        # pinned by Actix Web 4's `cookie = "0.16"`; the fix is only in cookie >= 0.18.3.
+        # Arc's session cookies are private (actix-session's default), but the flaw
+        # needs a process that fork()s without exec() and then adds private cookies
+        # on the forking thread. Arc never calls fork(), and actix-session adds the
+        # cookies on Actix worker threads. Drop this once Actix Web moves to cookie 0.18.
+        # url (RUSTSEC-2026-0592) needs no exception: Cargo.lock selects url >= 2.5.9.
         # rsa (RUSTSEC-2023-0071) and libsqlite3-sys (RUSTSEC-2026-0459) need no
         # exception: Arc depends on sqlx-core and sqlx-postgres rather than the sqlx
         # facade, so the facade's optional MySQL and SQLite drivers are no longer in
@@ -49,6 +56,7 @@ jobs:
           --ignore RUSTSEC-2026-0543
           --ignore RUSTSEC-2026-0555
           --ignore RUSTSEC-2026-0559
+          --ignore RUSTSEC-2026-0594
 
       - name: Upload audit results
         if: failure()
