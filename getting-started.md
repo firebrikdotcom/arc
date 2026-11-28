@@ -116,7 +116,10 @@ In: users().len()
 Out: 1
 ```
 
-See [Application Console](console.md) for the helpers and limits.
+`dispatch::<A>(command)` writes through the application's `CommandBus`, for
+example to create a record from the console. See
+[Application Console](console.md) for the helpers, how repeated evaluations
+are kept from writing twice, and the limits.
 
 ## Port 8080 is busy
 

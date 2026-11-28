@@ -2,7 +2,7 @@
 
 Arc is a Rust framework for building event-sourced Actix Web applications.
 
-All fourteen Arc packages are published at **0.9.4**, including the security and
+All fourteen Arc packages are published at **0.9.5**, including the security and
 reliability fixes and the PostgreSQL write guard described in [Published Packages](packages.md).
 
 Start here:

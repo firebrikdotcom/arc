@@ -84,7 +84,11 @@ These commands do not yet prove all manual adversarial cases above. In particula
 regression cases when repairing TM-03; passing existing tests cannot close that finding.
 The current Security workflow explicitly ignores `RUSTSEC-2026-0258` (h2 through Actix) and the
 unmaintained notices `RUSTSEC-2026-0543`, `-0555` and `-0559` (chrono, chrono-tz) in
-`cargo audit --deny warnings`. Reassess exposure, owner and expiry rather than treating ignored
+`cargo audit --deny warnings`. It also ignores `RUSTSEC-2026-0594` (private-cookie nonce reuse
+in `cookie` 0.16, pinned by Actix Web 4): Arc's session cookies are private, but the flaw needs a
+process that forks without exec and then adds private cookies on the forking thread, and Arc
+never forks. Confirm no deployment wraps Arc in a pre-fork supervisor, and drop the exception
+once Actix Web depends on `cookie` 0.18.3 or later. Reassess exposure, owner and expiry rather than treating ignored
 advisories as fixed. CodeQL is configured for JavaScript; its success is not Rust analysis.
 Inspect individual required job conclusions, not only the summary job. No current advisory lookup
 or external workflow execution is implied by this checklist.

@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"struct":["DbIdentityPlugin","DbIdentityStore"]};
+window.SIDEBAR_ITEMS = {"constant":["POSTGRES_BROWSER_SESSIONS_MIGRATION","POSTGRES_IDENTITY_ROLES_MIGRATION"],"struct":["DbIdentityPlugin","DbIdentityStore"]};
